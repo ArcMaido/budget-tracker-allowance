@@ -1,3 +1,9 @@
+import org.gradle.api.tasks.compile.JavaCompile
+
+plugins {
+    id("com.google.gms.google-services") version "4.4.0" apply false
+}
+
 allprojects {
     repositories {
         google()
@@ -17,6 +23,13 @@ subprojects {
 }
 subprojects {
     project.evaluationDependsOn(":app")
+}
+
+subprojects {
+    tasks.withType<JavaCompile>().configureEach {
+        // Some transitive plugin modules still compile with Java 8 and emit obsolete option warnings.
+        options.compilerArgs.add("-Xlint:-options")
+    }
 }
 
 tasks.register<Delete>("clean") {

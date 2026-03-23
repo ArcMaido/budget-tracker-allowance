@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "496228550401",
+    "project_id": "allowance-budget-tracker",
+    "storage_bucket": "allowance-budget-tracker.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:496228550401:android:9189dc1330688c9387fd00",
+        "android_client_info": {
+          "package_name": "com.app.allowance_budget_dashboard"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDF_mbd5W8f-ROSFDuqfTzC-1WDsKxPu_E"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
