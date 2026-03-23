@@ -857,7 +857,7 @@ class _DashboardPageState extends State<DashboardPage> {
 					Row(
 						children: [
 							Text(
-								'Coinzy',
+								'Coinzyss',
 								style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
 							),
 							const Spacer(),
