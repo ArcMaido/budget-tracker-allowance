@@ -2,11 +2,12 @@ import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
-import 'package:allowance_budget_dashboard/main.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import 'app_styles.dart';
 
 void main() {
 	runApp(const AllowanceBudgetApp());
@@ -378,22 +379,6 @@ class _DashboardPageState extends State<DashboardPage> {
 		});
 	}
 
-	String _monthlyRangeLabel(int selectedYear) {
-		if (_summaryPeriod == 'year') {
-			final years = _availableYears();
-			if (years.isEmpty) {
-				return '$selectedYear';
-			}
-			return '${years.last} - ${years.first}';
-		}
-		if (_summaryPeriod == 'week') {
-			final start = DateTime(selectedYear, _summaryMonth, 1);
-			final end = DateTime(selectedYear, _summaryMonth + 1, 0);
-			return '${DateFormat('MMM d, yyyy').format(start)} - ${DateFormat('MMM d, yyyy').format(end)}';
-		}
-		return 'Jan 1, $selectedYear - Dec 31, $selectedYear';
-	}
-
 	int _monthlyVisibleColumnCount() {
 		var count = 1; // Period column is always visible.
 		if (_monthlyShowAllowance) count++;
@@ -494,51 +479,7 @@ class _DashboardPageState extends State<DashboardPage> {
 		await _save();
 	}
 
-	Future<void> _addCategory() async {
-		final name = _categoryNameController.text.trim();
-		final budget = double.tryParse(_categoryBudgetController.text.trim());
-		if (name.isEmpty || budget == null || budget <= 0) {
-			_showHint('Category name and budget must both be valid.');
-			return;
-		}
 
-		if (_data.categories.containsKey(name)) {
-			_showHint('Category already exists. Use Update instead.');
-			return;
-		}
-
-		setState(() {
-			_data.categories[name] = budget;
-			_syncCategoryLineColors();
-			_categoryNameController.clear();
-			_categoryBudgetController.clear();
-			if (_expenseCategory.isEmpty || !_data.categories.containsKey(_expenseCategory)) {
-				_expenseCategory = name;
-			}
-		});
-		await _save();
-	}
-
-	Future<void> _updateCategory() async {
-		final name = _categoryNameController.text.trim();
-		final budget = double.tryParse(_categoryBudgetController.text.trim());
-		if (name.isEmpty || budget == null || budget <= 0) {
-			_showHint('Category name and budget must both be valid.');
-			return;
-		}
-
-		if (!_data.categories.containsKey(name)) {
-			_showHint('Category not found. Use Add instead.');
-			return;
-		}
-
-		setState(() {
-			_data.categories[name] = budget;
-			_categoryNameController.clear();
-			_categoryBudgetController.clear();
-		});
-		await _save();
-	}
 
 	Future<void> _removeCategory() async {
 		final name = _categoryNameController.text.trim();
@@ -857,7 +798,7 @@ class _DashboardPageState extends State<DashboardPage> {
 					Row(
 						children: [
 							Text(
-								'Coinzyss',
+								'Coinzy',
 								style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
 							),
 							const Spacer(),
@@ -2796,7 +2737,6 @@ class _ProfilePageState extends State<ProfilePage> {
 
 	@override
 	Widget build(BuildContext context) {
-		final scheme = Theme.of(context).colorScheme;
 		final titleStyle = Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700);
 
 		return Scaffold(
