@@ -3,11 +3,13 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/services.dart';
 
 class AuthService {
   static final FirebaseAuth _auth = FirebaseAuth.instance;
   static final GoogleSignIn _googleSignIn = GoogleSignIn();
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  static const String _forceLoginAfterSignupKey = 'force_login_after_signup';
 
   // Get current user
   static User? get currentUser => _auth.currentUser;
@@ -35,12 +37,75 @@ class AuthService {
         // Mark as new user in local preferences
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('isNewUser', true);
+
+        // Force next app state to return to login after successful sign-up.
+        await _setForceLoginAfterSignup(true);
+        await signOut();
       }
       return userCredential;
     } on FirebaseAuthException catch (e) {
       print('SignUp error: ${e.message}');
       rethrow;
+    } catch (e) {
+      final message = e.toString();
+      final isKnownPigeonCastIssue =
+          message.contains('PigeonUserDetails') ||
+          message.contains("List<Object> is not a subtype");
+
+      if (isKnownPigeonCastIssue) {
+        // Account creation may have completed before a plugin bridge cast error.
+        // Attempt a normal sign-in so the user can continue.
+        final fallback = await _auth.signInWithEmailAndPassword(
+          email: email,
+          password: password,
+        );
+
+        if (fallback.user != null) {
+          await fallback.user!.updateDisplayName(fullName);
+          await _saveUserProfile(
+            fallback.user!,
+            fullName,
+            email,
+            isNewUser: true,
+          );
+          await _syncToLocalStorage(fallback.user!);
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setBool('isNewUser', true);
+
+          await _setForceLoginAfterSignup(true);
+          await signOut();
+          return fallback;
+        }
+      }
+
+      rethrow;
     }
+  }
+
+  // Google sign-up flow with required password setup.
+  static Future<void> signUpWithGoogleAndPassword({
+    required String password,
+  }) async {
+    final userCredential = await signInWithGoogle();
+    if (userCredential?.user == null) {
+      throw Exception('Google sign-up cancelled or failed.');
+    }
+
+    await finalizeGoogleSignupWithPassword(password: password);
+  }
+
+  // Finalize Google sign-up for an already selected Google account.
+  static Future<void> finalizeGoogleSignupWithPassword({
+    required String password,
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null) {
+      throw Exception('No Google account selected. Please try again.');
+    }
+
+    await linkEmailPasswordToCurrentUser(password: password);
+    await _setForceLoginAfterSignup(true);
+    await signOut();
   }
 
   // Sign in with email and password
@@ -86,8 +151,57 @@ class AuthService {
         await _syncToLocalStorage(userCredential.user!);
       }
       return userCredential;
+    } on PlatformException catch (e) {
+      final message = e.message ?? '';
+      final details = e.details?.toString() ?? '';
+      final raw = '$message $details';
+
+      if (raw.contains('ApiException: 10') || raw.contains('ApiException:10')) {
+        throw Exception(
+          'Google Sign-In is not fully configured for Android (OAuth/SHA). '
+          'Add SHA-1 and SHA-256 in Firebase, download updated google-services.json, and rebuild the app.',
+        );
+      }
+
+      print('Google SignIn platform error: $e');
+      rethrow;
     } catch (e) {
       print('Google SignIn error: $e');
+      rethrow;
+    }
+  }
+
+  // Link email/password to currently signed-in user (useful for Google sign-up flow)
+  static Future<void> linkEmailPasswordToCurrentUser({
+    required String password,
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null) {
+      throw Exception('No authenticated user found. Please try Google sign-up again.');
+    }
+
+    final email = user.email;
+    if (email == null || email.isEmpty) {
+      throw Exception('Google account has no email. Cannot set password.');
+    }
+
+    final alreadyLinked = user.providerData.any((p) => p.providerId == 'password');
+    if (alreadyLinked) {
+      return;
+    }
+
+    try {
+      final credential = EmailAuthProvider.credential(
+        email: email,
+        password: password,
+      );
+      await user.linkWithCredential(credential);
+    } on FirebaseAuthException catch (e) {
+      if (e.code == 'provider-already-linked' ||
+          e.code == 'credential-already-in-use' ||
+          e.code == 'email-already-in-use') {
+        return;
+      }
       rethrow;
     }
   }
@@ -96,12 +210,39 @@ class AuthService {
   static Future<void> signOut() async {
     try {
       await _googleSignIn.signOut();
+    } catch (e) {
+      // Google sign-out can fail when no Google session exists; continue.
+      print('Google SignOut warning: $e');
+    }
+
+    try {
       await _auth.signOut();
+    } catch (e) {
+      print('Firebase SignOut error: $e');
+    }
+
+    try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('userData');
     } catch (e) {
-      print('SignOut error: $e');
+      print('Local SignOut cleanup error: $e');
     }
+  }
+
+  static Future<void> _setForceLoginAfterSignup(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_forceLoginAfterSignupKey, enabled);
+  }
+
+  // Returns true once, then clears the flag.
+  static Future<bool> consumeForceLoginAfterSignup() async {
+    final prefs = await SharedPreferences.getInstance();
+    final shouldForceLogin = prefs.getBool(_forceLoginAfterSignupKey) ?? false;
+    if (shouldForceLogin) {
+      await prefs.remove(_forceLoginAfterSignupKey);
+      return true;
+    }
+    return false;
   }
 
   // Save user profile to Firebase

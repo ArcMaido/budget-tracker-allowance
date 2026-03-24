@@ -23,6 +23,21 @@ class _LoginPageState extends State<LoginPage> {
   bool _isLoading = false;
   String _errorMessage = '';
 
+  String _friendlyAuthError(Object error, {required bool isGoogle}) {
+    final raw = error.toString();
+    if (raw.contains('PigeonUserDetails') ||
+        raw.contains("List<Object> is not a subtype")) {
+      return 'Auth plugin sync issue detected. Please restart the app and try again.';
+    }
+    if (raw.contains('ApiException:10') || raw.contains('ApiException: 10')) {
+      return 'Google sign-in is not fully configured yet. Complete SHA setup in Firebase and rebuild the app.';
+    }
+    if (isGoogle) {
+      return 'Google sign-in failed: $raw';
+    }
+    return 'Login failed: ${raw.replaceAll('[firebase_auth/user-not-found]', '').replaceAll('[firebase_auth/wrong-password]', '').trim()}';
+  }
+
   @override
   void dispose() {
     _emailController.dispose();
@@ -47,25 +62,23 @@ class _LoginPageState extends State<LoginPage> {
         password: _passwordController.text,
       );
     } catch (e) {
-      setState(() => _errorMessage = 'Login failed: ${e.toString().replaceAll('[firebase_auth/user-not-found]', '').replaceAll('[firebase_auth/wrong-password]', '')}');
+      setState(() => _errorMessage = _friendlyAuthError(e, isGoogle: false));
     } finally {
       setState(() => _isLoading = false);
     }
   }
 
   Future<void> _signInWithGoogle() async {
-    setState(() {
-      _isLoading = true;
-      _errorMessage = '';
-    });
-
-    try {
-      await AuthService.signInWithGoogle();
-    } catch (e) {
-      setState(() => _errorMessage = 'Google sign-in failed: ${e.toString()}');
-    } finally {
-      setState(() => _isLoading = false);
-    }
+    if (_isLoading) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => SignupPage(
+          isDarkMode: widget.isDarkMode,
+          onToggleDarkMode: widget.onToggleDarkMode,
+          autoStartGoogleSignup: true,
+        ),
+      ),
+    );
   }
 
   @override
@@ -190,7 +203,7 @@ class _LoginPageState extends State<LoginPage> {
                           OutlinedButton.icon(
                             onPressed: _isLoading ? null : _signInWithGoogle,
                             icon: const Icon(Icons.g_mobiledata_rounded, size: 28),
-                            label: const Text('Sign in with Google'),
+                            label: const Text('Create account with Google'),
                           ),
                         ],
                       ),

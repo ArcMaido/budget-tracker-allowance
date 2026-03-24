@@ -7,32 +7,46 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:allowance_budget_dashboard/main.dart';
+import 'package:allowance_budget_dashboard/pages/login_page.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  setUp(() {
-    SharedPreferences.setMockInitialValues({});
+  test('Login page widget can be constructed', () {
+    const page = LoginPage(
+      isDarkMode: false,
+      onToggleDarkMode: _noopToggle,
+    );
+    expect(page, isA<StatefulWidget>());
   });
 
-  test('App widget can be constructed', () {
-    const app = AllowanceBudgetApp();
-    expect(app, isA<StatefulWidget>());
-  });
-
-  testWidgets('App loads and shows brand title', (WidgetTester tester) async {
-    await tester.pumpWidget(const AllowanceBudgetApp());
+  testWidgets('Login page shows welcome title', (WidgetTester tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: LoginPage(
+          isDarkMode: false,
+          onToggleDarkMode: _noopToggle,
+        ),
+      ),
+    );
     await tester.pumpAndSettle();
 
-    expect(find.text('Coinzy'), findsOneWidget);
+    expect(find.text('Welcome Back'), findsOneWidget);
   });
 
-  testWidgets('Bottom navigation shows Overview', (WidgetTester tester) async {
-    await tester.pumpWidget(const AllowanceBudgetApp());
+  testWidgets('Login page shows sign in action', (WidgetTester tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: LoginPage(
+          isDarkMode: false,
+          onToggleDarkMode: _noopToggle,
+        ),
+      ),
+    );
     await tester.pumpAndSettle();
 
-    expect(find.text('Overview'), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, 'Sign In'), findsOneWidget);
   });
 }
+
+void _noopToggle(bool _) {}

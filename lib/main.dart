@@ -4,12 +4,14 @@ import 'dart:math' as math;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app_styles.dart';
 import 'auth_service.dart';
 import 'data_service.dart';
+import 'firebase_service.dart';
 import 'firebase_options.dart';
 import 'pages/loading_page.dart';
 import 'pages/login_page.dart';
@@ -20,6 +22,10 @@ void main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+
+  // Always start from the login screen by clearing any persisted auth session.
+  await AuthService.signOut();
+
   runApp(const AllowanceBudgetApp());
 }
 
@@ -155,9 +161,26 @@ class _AllowanceBudgetAppState extends State<AllowanceBudgetApp> {
           );
         }
 
-        return UserAuthWrapper(
-          isDarkMode: _darkMode,
-          onToggleDarkMode: _setDarkMode,
+        // Enforce post-signup flow: account creation must return to login first.
+        return FutureBuilder<bool>(
+          future: AuthService.consumeForceLoginAfterSignup(),
+          builder: (context, forceLoginSnapshot) {
+            if (forceLoginSnapshot.connectionState == ConnectionState.waiting) {
+              return const LoadingPage();
+            }
+
+            if (forceLoginSnapshot.data == true) {
+              return LoginPage(
+                isDarkMode: _darkMode,
+                onToggleDarkMode: _setDarkMode,
+              );
+            }
+
+            return UserAuthWrapper(
+              isDarkMode: _darkMode,
+              onToggleDarkMode: _setDarkMode,
+            );
+          },
         );
       },
     );
@@ -244,6 +267,7 @@ class AllowanceBudgetHome extends StatefulWidget {
 
 class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
   static const _storageKey = 'allowance-dashboard-v3-flutter';
+  static const _legacyStorageKey = 'allowance-dashboard-v3-flutter';
 
   final NumberFormat _moneyFormat = NumberFormat.currency(
     locale: 'en_PH',
@@ -273,7 +297,7 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
   int _summaryStartDay = 1;
   int _monthlyRowsPerPage = 8;
   int _monthlyPage = 0;
-  int _historyRowsPerPage = 10;
+  final int _historyRowsPerPage = 10;
   int _historyPage = 0;
   bool _monthlyShowAllowance = true;
   bool _monthlyShowSpent = true;
@@ -335,7 +359,14 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
   Future<void> _load() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString(_storageKey);
+      final raw = prefs.getString(_scopedStorageKey());
+
+      // One-time cleanup: remove old shared key so users do not inherit
+      // previous account data from older app versions.
+      if (prefs.containsKey(_legacyStorageKey)) {
+        await prefs.remove(_legacyStorageKey);
+      }
+
       setState(() {
         _data = raw == null ? BudgetData.defaultState() : BudgetData.fromJson(raw);
         _syncCategoryLineColors();
@@ -384,7 +415,7 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
 
   Future<void> _save() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_storageKey, _data.toJson());
+    await prefs.setString(_scopedStorageKey(), _data.toJson());
 
     try {
       final user = FirebaseAuth.instance.currentUser;
@@ -408,6 +439,14 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
     } catch (e) {
       debugPrint('Firebase sync error: $e');
     }
+  }
+
+  String _scopedStorageKey() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null || uid.isEmpty) {
+      return '${_storageKey}_guest';
+    }
+    return '${_storageKey}_$uid';
   }
 
   String _money(num value) => _moneyFormat.format(value);
@@ -647,7 +686,7 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
   }
 
-  void _openSettingsPage() {
+  void _openProfilePage() {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => ProfilePage(
@@ -659,9 +698,32 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
     );
   }
 
+  void _openSettingsPage() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => SettingsPage(
+          isDarkMode: widget.isDarkMode,
+          onToggleDarkMode: widget.onToggleDarkMode,
+        ),
+      ),
+    );
+  }
+
   Widget _buildSettingsButton() {
     return IconButton(
       onPressed: _openSettingsPage,
+      icon: const Icon(Icons.settings_outlined),
+      style: IconButton.styleFrom(
+        backgroundColor: const Color(0xFFE2EFE8),
+        foregroundColor: const Color(0xFF1A7A59),
+      ),
+      tooltip: 'Settings',
+    );
+  }
+
+  Widget _buildProfileButton() {
+    return IconButton(
+      onPressed: _openProfilePage,
       icon: const Icon(Icons.account_circle_outlined),
       style: IconButton.styleFrom(
         backgroundColor: const Color(0xFF1A7A59),
@@ -879,6 +941,8 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
               ),
               const Spacer(),
               _buildSettingsButton(),
+              const SizedBox(width: 8),
+              _buildProfileButton(),
             ],
           ),
           const SizedBox(height: 10),
@@ -1327,7 +1391,6 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
                 );
                 final chartB = _ChartCard(
                   title: '12-Month Spending (Line graph)',
-                  child: MonthlyLineChart(series: lineSeries, labels: labels, lineColors: lineColors),
                   footer: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -1374,6 +1437,7 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
                       ),
                     ],
                   ),
+                  child: MonthlyLineChart(series: lineSeries, labels: labels, lineColors: lineColors),
                 );
 
                 if (constraints.maxWidth < 900) {
@@ -2497,8 +2561,8 @@ class BudgetData {
         }
       });
       return BudgetData(
-        monthlyAllowance: ((map['monthlyAllowance'] as num?)?.toDouble() ?? 350),
-        categories: categories.isEmpty ? BudgetData.defaultState().categories : categories,
+        monthlyAllowance: ((map['monthlyAllowance'] as num?)?.toDouble() ?? 0),
+        categories: categories,
         transactions: txRaw
             .map((item) => ExpenseTx.fromMap(item as Map<String, dynamic>))
             .toList(),
@@ -2510,20 +2574,9 @@ class BudgetData {
 
   factory BudgetData.defaultState() {
     return BudgetData(
-      monthlyAllowance: 350,
-      categories: {
-        'Food': 120,
-        'Transport': 70,
-        'School': 80,
-        'Leisure': 60,
-      },
-      transactions: [
-        ExpenseTx(id: '1', title: 'Lunch', amount: 18, category: 'Food', date: DateTime(2026, 3, 2)),
-        ExpenseTx(id: '2', title: 'Bus Card', amount: 22, category: 'Transport', date: DateTime(2026, 3, 4)),
-        ExpenseTx(id: '3', title: 'Notebook', amount: 14, category: 'School', date: DateTime(2026, 3, 6)),
-        ExpenseTx(id: '4', title: 'Snacks', amount: 11, category: 'Food', date: DateTime(2026, 3, 9)),
-        ExpenseTx(id: '5', title: 'Movie', amount: 20, category: 'Leisure', date: DateTime(2026, 2, 18)),
-      ],
+      monthlyAllowance: 0,
+      categories: {},
+      transactions: [],
     );
   }
 }
@@ -2564,6 +2617,56 @@ class ExpenseTx {
   }
 }
 
+class SettingsPage extends StatelessWidget {
+  const SettingsPage({
+    super.key,
+    required this.isDarkMode,
+    required this.onToggleDarkMode,
+  });
+
+  final bool isDarkMode;
+  final ValueChanged<bool> onToggleDarkMode;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Settings')),
+      body: ListView(
+        padding: const EdgeInsets.all(12),
+        children: [
+          Card(
+            child: SwitchListTile.adaptive(
+              value: isDarkMode,
+              onChanged: onToggleDarkMode,
+              title: const Text('Dark mode'),
+              subtitle: const Text('Switch app appearance'),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.person_outline),
+              title: const Text('Edit Profile'),
+              subtitle: const Text('Update photo, name, and role'),
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => ProfilePage(
+                      isDarkMode: isDarkMode,
+                      onToggleDarkMode: onToggleDarkMode,
+                      onLogout: () {},
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class ProfilePage extends StatefulWidget {
   const ProfilePage({
     super.key,
@@ -2581,10 +2684,172 @@ class ProfilePage extends StatefulWidget {
 }
 
 class _ProfilePageState extends State<ProfilePage> {
+  final _nameController = TextEditingController();
+  final _roleController = TextEditingController();
+  final _picker = ImagePicker();
+
+  String? _photoUrl;
+  bool _loading = true;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadProfile();
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _roleController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadProfile() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      if (mounted) {
+        setState(() => _loading = false);
+      }
+      return;
+    }
+
+    try {
+      final profile = await FirebaseService.getUserProfile(user.uid);
+      final fullName = (profile?['fullName'] as String?)?.trim();
+      final role = (profile?['role'] as String?)?.trim();
+      final photoUrl = (profile?['photoUrl'] as String?)?.trim();
+
+      if (!mounted) return;
+      setState(() {
+        _nameController.text =
+            (fullName != null && fullName.isNotEmpty)
+                ? fullName
+                : (user.displayName ?? '');
+        _roleController.text =
+            (role != null && role.isNotEmpty) ? role : 'Student';
+        _photoUrl =
+            (photoUrl != null && photoUrl.isNotEmpty)
+                ? photoUrl
+                : user.photoURL;
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _nameController.text = user.displayName ?? '';
+        _roleController.text = 'Student';
+        _photoUrl = user.photoURL;
+        _loading = false;
+      });
+    }
+  }
+
+  Future<void> _pickAndUploadPhoto() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final picked = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 75);
+    if (picked == null) {
+      return;
+    }
+
+    setState(() => _saving = true);
+    try {
+      final url = await FirebaseService.uploadProfileImage(
+        userId: user.uid,
+        filePath: picked.path,
+      );
+
+      if (url == null || url.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Unable to upload photo. Please try again.')),
+          );
+        }
+        return;
+      }
+
+      setState(() => _photoUrl = url);
+      await AuthService.updateUserProfile(
+        fullName: _nameController.text.trim().isEmpty
+            ? (user.displayName ?? 'User')
+            : _nameController.text.trim(),
+        photoUrl: url,
+      );
+      await FirebaseService.saveUserProfile(
+        userId: user.uid,
+        userData: {'photoUrl': url},
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Profile photo updated.')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _saving = false);
+      }
+    }
+  }
+
+  Future<void> _saveProfile() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final fullName = _nameController.text.trim();
+    final role = _roleController.text.trim();
+    if (fullName.isEmpty || role.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Name and role are required.')),
+      );
+      return;
+    }
+
+    setState(() => _saving = true);
+    try {
+      await AuthService.updateUserProfile(
+        fullName: fullName,
+        photoUrl: _photoUrl,
+      );
+      await FirebaseService.saveUserProfile(
+        userId: user.uid,
+        userData: {
+          'fullName': fullName,
+          'role': role,
+          'photoUrl': _photoUrl,
+          'lastUpdated': DateTime.now(),
+        },
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Profile updated successfully.')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _saving = false);
+      }
+    }
+  }
+
+  ImageProvider<Object>? _photoProvider() {
+    if (_photoUrl == null || _photoUrl!.isEmpty) {
+      return null;
+    }
+    return NetworkImage(_photoUrl!);
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final user = FirebaseAuth.instance.currentUser;
+
+    if (_loading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -2607,34 +2872,79 @@ class _ProfilePageState extends State<ProfilePage> {
           Card(
             child: Padding(
               padding: const EdgeInsets.all(14),
-              child: Row(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  CircleAvatar(
-                    radius: 26,
-                    backgroundColor: scheme.primaryContainer,
-                    child: Icon(Icons.person, color: scheme.primary),
+                  Row(
+                    children: [
+                      CircleAvatar(
+                        radius: 32,
+                        backgroundColor: scheme.primaryContainer,
+                        backgroundImage: _photoProvider(),
+                        child: _photoProvider() == null
+                            ? Icon(Icons.person, color: scheme.primary)
+                            : null,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              _nameController.text.isNotEmpty
+                                  ? _nameController.text
+                                  : 'User',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleMedium
+                                  ?.copyWith(fontWeight: FontWeight.w700),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              user?.email ?? 'No email',
+                              style: TextStyle(color: scheme.onSurfaceVariant),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          user?.displayName?.isNotEmpty == true
-                              ? user!.displayName!
-                              : 'User',
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleMedium
-                              ?.copyWith(fontWeight: FontWeight.w700),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          user?.email ?? 'No email',
-                          style: TextStyle(color: scheme.onSurfaceVariant),
-                        ),
-                      ],
+                  const SizedBox(height: 10),
+                  OutlinedButton.icon(
+                    onPressed: _saving ? null : _pickAndUploadPhoto,
+                    icon: const Icon(Icons.photo_camera_outlined),
+                    label: const Text('Change profile photo'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                children: [
+                  TextField(
+                    controller: _nameController,
+                    decoration: const InputDecoration(
+                      labelText: 'Full name',
+                      prefixIcon: Icon(Icons.person_outline),
                     ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: _roleController,
+                    decoration: const InputDecoration(
+                      labelText: 'Role',
+                      prefixIcon: Icon(Icons.badge_outlined),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  FilledButton.icon(
+                    onPressed: _saving ? null : _saveProfile,
+                    icon: const Icon(Icons.save_outlined),
+                    label: Text(_saving ? 'Saving...' : 'Save profile'),
                   ),
                 ],
               ),
