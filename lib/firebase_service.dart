@@ -186,13 +186,39 @@ class FirebaseService {
   }) async {
     try {
       final file = File(filePath);
-      final ref = _storage.ref().child('users/$userId/profile_image.jpg');
+      final stamp = DateTime.now().millisecondsSinceEpoch;
+      final ref = _storage
+          .ref()
+          .child('users/$userId/profile_images/profile_$stamp.jpg');
       final uploadTask = ref.putFile(file);
       await uploadTask;
       return await ref.getDownloadURL();
+    } on FirebaseException catch (e) {
+      throw Exception('storage/${e.code}: ${e.message ?? 'Upload failed'}');
     } catch (e) {
       print('Error uploading profile image: $e');
-      return null;
+      throw Exception('Upload failed: $e');
+    }
+  }
+
+  static Future<String?> uploadCoverImage({
+    required String userId,
+    required String filePath,
+  }) async {
+    try {
+      final file = File(filePath);
+      final stamp = DateTime.now().millisecondsSinceEpoch;
+      final ref = _storage
+          .ref()
+          .child('users/$userId/cover_images/cover_$stamp.jpg');
+      final uploadTask = ref.putFile(file);
+      await uploadTask;
+      return await ref.getDownloadURL();
+    } on FirebaseException catch (e) {
+      throw Exception('storage/${e.code}: ${e.message ?? 'Upload failed'}');
+    } catch (e) {
+      print('Error uploading cover image: $e');
+      throw Exception('Upload failed: $e');
     }
   }
 

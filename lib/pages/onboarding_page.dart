@@ -20,14 +20,22 @@ class _OnboardingPageState extends State<OnboardingPage> {
     OnboardingScreen(
       icon: Icons.wallet,
       title: 'Welcome to Coinzy',
-      description: 'Your personal budget tracker to manage your allowance wisely',
+      description:
+          'Coinzy helps you plan your allowance, track spending, and build better money habits day by day.',
       color: const Color(0xFF1A7A59),
+    ),
+    OnboardingScreen(
+      icon: Icons.lightbulb_outline,
+      title: 'What This App Helps You Do',
+      description:
+          'See where your money goes, avoid overspending, and stay aware of your remaining balance before the month ends.',
+      color: const Color(0xFF2F855A),
     ),
     OnboardingScreen(
       icon: Icons.category,
       title: 'Create Categories',
       description:
-          'Start by adding spending categories like Food, Entertainment, Transport, etc. Set a monthly budget for each category.',
+          'Create categories like Food, Transportation, School, and Savings. Set a budget for each one.',
       color: const Color(0xFF4F6358),
     ),
     OnboardingScreen(
@@ -48,7 +56,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
       icon: Icons.trending_up,
       title: 'Stay in Budget',
       description:
-          'The progress bar shows how much of your allowance you\'ve used. Try to stay within your category budgets!',
+          'Use progress bars and monthly totals to stay within budget and improve your spending decisions.',
       color: const Color(0xFF0B6E3F),
     ),
   ];

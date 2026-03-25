@@ -27,6 +27,44 @@ class _SignupPageState extends State<SignupPage> {
   bool _isLoading = false;
   String _errorMessage = '';
   bool _agreedToTerms = false;
+  bool _emailPrefilledFromGoogle = false;
+  bool _namePrefilledFromGoogle = false;
+  String? _googlePhotoUrl;
+
+  Future<void> _showSignupNotice({
+    required String title,
+    required String message,
+    required bool success,
+  }) async {
+    if (!mounted) return;
+    final scheme = Theme.of(context).colorScheme;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Row(
+            children: [
+              Icon(
+                success ? Icons.check_circle_outline : Icons.info_outline,
+                color: success ? Colors.green : scheme.primary,
+              ),
+              const SizedBox(width: 8),
+              Expanded(child: Text(title)),
+            ],
+          ),
+          content: Text(message),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Continue'),
+            ),
+          ],
+        );
+      },
+    );
+  }
 
   @override
   void initState() {
@@ -34,17 +72,25 @@ class _SignupPageState extends State<SignupPage> {
     if (widget.autoStartGoogleSignup) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
-          _signUpWithGoogle();
+          _selectGoogleEmail();
         }
       });
     }
   }
 
-  Future<void> _returnToLogin({required String message}) async {
-    await AuthService.signOut();
+  Future<void> _returnToLogin() async {
+    final signedOut = await AuthService.ensureSignedOut();
     if (!mounted) return;
 
-    // Return to the login route and avoid leaving signup on top of a signed-in screen.
+    if (!signedOut) {
+      setState(() {
+        _errorMessage =
+            'Could not complete sign-out cleanly. Please restart the app, then sign in.';
+      });
+      return;
+    }
+
+    // Return to the existing root login route so auth state can drive app entry.
     Navigator.of(context).popUntil((route) => route.isFirst);
   }
 
@@ -55,7 +101,7 @@ class _SignupPageState extends State<SignupPage> {
     }
     if (raw.contains('PigeonUserDetails') ||
         raw.contains("List<Object> is not a subtype")) {
-      return 'Account may already be created. Please try signing in now.';
+      return 'Account is ready. Please sign in on the Login page.';
     }
     if (raw.contains('ApiException:10') || raw.contains('ApiException: 10')) {
       return 'Google sign-in is not fully configured yet. Complete SHA setup in Firebase and rebuild the app.';
@@ -64,101 +110,6 @@ class _SignupPageState extends State<SignupPage> {
       return 'Google sign-up failed: $raw';
     }
     return 'Sign up failed: ${raw.split(']').last.trim()}';
-  }
-
-  Future<String?> _askPasswordForGoogleSignup({required String email}) async {
-    final passwordController = TextEditingController();
-    final confirmController = TextEditingController();
-    String localError = '';
-
-    final result = await showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setLocalState) {
-            return AlertDialog(
-              title: const Text('Set Password'),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text(
-                    'Create a password for this Google account so you can also sign in with email and password.',
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: TextEditingController(text: email),
-                    enabled: false,
-                    decoration: const InputDecoration(
-                      labelText: 'Google email',
-                      prefixIcon: Icon(Icons.email_outlined),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: passwordController,
-                    obscureText: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Password',
-                      prefixIcon: Icon(Icons.lock_outline),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: confirmController,
-                    obscureText: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Confirm password',
-                      prefixIcon: Icon(Icons.lock_outline),
-                    ),
-                  ),
-                  if (localError.isNotEmpty) ...[
-                    const SizedBox(height: 10),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        localError,
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.error,
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(null),
-                  child: const Text('Cancel'),
-                ),
-                FilledButton(
-                  onPressed: () {
-                    final pass = passwordController.text.trim();
-                    final confirm = confirmController.text.trim();
-
-                    if (pass.length < 6) {
-                      setLocalState(() => localError = 'Password must be at least 6 characters.');
-                      return;
-                    }
-                    if (pass != confirm) {
-                      setLocalState(() => localError = 'Passwords do not match.');
-                      return;
-                    }
-
-                    Navigator.of(context).pop(pass);
-                  },
-                  child: const Text('Save'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-
-    passwordController.dispose();
-    confirmController.dispose();
-    return result;
   }
 
   @override
@@ -205,16 +156,42 @@ class _SignupPageState extends State<SignupPage> {
         email: _emailController.text.trim(),
         password: _passwordController.text,
         fullName: _nameController.text.trim(),
+        photoUrl: _googlePhotoUrl,
       );
-      await _returnToLogin(
-        message: 'Account created. Please sign in with your email and password.',
+      await _showSignupNotice(
+        title: 'Account Created',
+        message: 'Your account was created successfully. Please sign in with your email and password.',
+        success: true,
       );
+      await _returnToLogin();
     } catch (e) {
       final raw = e.toString();
+      final email = _emailController.text.trim();
+      final hasPasswordSignIn =
+          email.isNotEmpty && await AuthService.isEmailRegisteredForPassword(email);
+
       if (raw.contains('email-already-in-use')) {
-        await _returnToLogin(
-          message: 'Account already exists. Please sign in using your email and password.',
+        await _showSignupNotice(
+          title: 'Account Exists',
+          message: 'This email is already registered. Please sign in on the Login page.',
+          success: false,
         );
+        await _returnToLogin();
+      } else if (raw.contains('PigeonUserDetails') ||
+          raw.contains("List<Object> is not a subtype")) {
+        await _showSignupNotice(
+          title: 'Account Ready',
+          message: 'Account was created. Please sign in on the Login page.',
+          success: false,
+        );
+        await _returnToLogin();
+      } else if (hasPasswordSignIn) {
+        await _showSignupNotice(
+          title: 'Account Ready',
+          message: 'Account is ready. Please sign in on the Login page.',
+          success: false,
+        );
+        await _returnToLogin();
       } else {
         if (mounted) {
           setState(() => _errorMessage = _friendlyAuthError(e, isGoogle: false));
@@ -227,50 +204,33 @@ class _SignupPageState extends State<SignupPage> {
     }
   }
 
-  Future<void> _signUpWithGoogle() async {
+  Future<void> _selectGoogleEmail() async {
     setState(() {
       _isLoading = true;
       _errorMessage = '';
     });
 
     try {
-      final googleCredential = await AuthService.signInWithGoogle();
-      if (googleCredential == null) {
+      final prefill = await AuthService.pickGoogleEmailForSignup();
+      if (prefill == null || prefill.email.isEmpty) {
         if (mounted) {
           setState(() => _isLoading = false);
         }
         return;
       }
-
-      final selectedEmail =
-          googleCredential.user?.email ?? AuthService.currentUser?.email ?? '';
-      if (selectedEmail.isEmpty) {
-        await AuthService.signOut();
-        if (mounted) {
-          setState(() => _errorMessage = 'Unable to read Google email. Please try again.');
-        }
-        return;
-      }
-
       if (!mounted) return;
-      final chosenPassword = await _askPasswordForGoogleSignup(email: selectedEmail);
-      if (chosenPassword == null) {
-        await AuthService.signOut();
-        if (mounted) {
-          setState(() {
-            _errorMessage =
-                'Google sign-up cancelled. Please try again and set a password.';
-          });
+      final displayName = (prefill.displayName ?? '').trim();
+      setState(() {
+        _emailController.text = prefill.email;
+        if (displayName.isNotEmpty) {
+          _nameController.text = displayName;
+          _namePrefilledFromGoogle = true;
         }
-        return;
-      }
-
-      await AuthService.finalizeGoogleSignupWithPassword(
-        password: chosenPassword,
-      );
-      await _returnToLogin(
-        message: 'Google account created. Please sign in using email/password.',
-      );
+        _googlePhotoUrl = (prefill.photoUrl ?? '').trim().isNotEmpty
+            ? prefill.photoUrl!.trim()
+            : null;
+        _emailPrefilledFromGoogle = true;
+      });
     } catch (e) {
       if (mounted) {
         setState(() => _errorMessage = _friendlyAuthError(e, isGoogle: true));
@@ -363,12 +323,32 @@ class _SignupPageState extends State<SignupPage> {
                           const SizedBox(height: 12),
                           TextField(
                             controller: _emailController,
-                            enabled: !_isLoading,
+                            enabled: !_isLoading && !_emailPrefilledFromGoogle,
                             decoration: const InputDecoration(
                               labelText: 'Email address',
                               prefixIcon: Icon(Icons.email_outlined),
                             ),
                           ),
+                          if (_emailPrefilledFromGoogle)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 6),
+                              child: Text(
+                                'Email was selected from Google account.',
+                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: scheme.onSurfaceVariant,
+                                    ),
+                              ),
+                            ),
+                          if (_namePrefilledFromGoogle)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 6),
+                              child: Text(
+                                'Name was prefilled from Google. You can still edit it.',
+                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: scheme.onSurfaceVariant,
+                                    ),
+                              ),
+                            ),
                           const SizedBox(height: 12),
                           TextField(
                             controller: _passwordController,
@@ -430,9 +410,13 @@ class _SignupPageState extends State<SignupPage> {
                           ),
                           const SizedBox(height: 10),
                           OutlinedButton.icon(
-                            onPressed: _isLoading ? null : _signUpWithGoogle,
+                            onPressed: _isLoading ? null : _selectGoogleEmail,
                             icon: const Icon(Icons.g_mobiledata_rounded, size: 28),
-                            label: const Text('Sign up with Google'),
+                            label: Text(
+                              _emailPrefilledFromGoogle
+                                  ? 'Google profile selected'
+                                  : 'Use Google to prefill profile',
+                            ),
                           ),
                         ],
                       ),

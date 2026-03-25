@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
+import 'package:country_flags/country_flags.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
@@ -22,9 +24,6 @@ void main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
-
-  // Always start from the login screen by clearing any persisted auth session.
-  await AuthService.signOut();
 
   runApp(const AllowanceBudgetApp());
 }
@@ -149,38 +148,30 @@ class _AllowanceBudgetAppState extends State<AllowanceBudgetApp> {
   Widget _buildAuthFlow() {
     return StreamBuilder<User?>(
       stream: AuthService.authStateChanges(),
+      initialData: AuthService.currentUser,
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
+        final activeUser = snapshot.data ?? AuthService.currentUser;
+
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            activeUser == null) {
           return const LoadingPage();
         }
 
-        if (snapshot.data == null) {
+        if (activeUser == null) {
           return LoginPage(
             isDarkMode: _darkMode,
             onToggleDarkMode: _setDarkMode,
+            onSignedIn: () {
+              if (mounted) {
+                setState(() {});
+              }
+            },
           );
         }
 
-        // Enforce post-signup flow: account creation must return to login first.
-        return FutureBuilder<bool>(
-          future: AuthService.consumeForceLoginAfterSignup(),
-          builder: (context, forceLoginSnapshot) {
-            if (forceLoginSnapshot.connectionState == ConnectionState.waiting) {
-              return const LoadingPage();
-            }
-
-            if (forceLoginSnapshot.data == true) {
-              return LoginPage(
-                isDarkMode: _darkMode,
-                onToggleDarkMode: _setDarkMode,
-              );
-            }
-
-            return UserAuthWrapper(
-              isDarkMode: _darkMode,
-              onToggleDarkMode: _setDarkMode,
-            );
-          },
+        return UserAuthWrapper(
+          isDarkMode: _darkMode,
+          onToggleDarkMode: _setDarkMode,
         );
       },
     );
@@ -229,6 +220,7 @@ class _UserAuthWrapperState extends State<UserAuthWrapper> {
   }
 
   void _completeOnboarding() {
+    AuthService.completeOnboarding();
     setState(() => _showOnboarding = false);
   }
 
@@ -268,12 +260,19 @@ class AllowanceBudgetHome extends StatefulWidget {
 class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
   static const _storageKey = 'allowance-dashboard-v3-flutter';
   static const _legacyStorageKey = 'allowance-dashboard-v3-flutter';
+  static const _currencyStoragePrefix = 'currency_code';
 
-  final NumberFormat _moneyFormat = NumberFormat.currency(
-    locale: 'en_PH',
-    symbol: 'PHP ',
-    decimalDigits: 0,
-  );
+  static const Map<String, String> _currencySymbols = {
+    'PHP': 'PHP ',
+    'USD': r'$',
+    'EUR': 'EUR ',
+    'GBP': 'GBP ',
+    'JPY': 'JPY ',
+    'AUD': 'AUD ',
+    'CAD': 'CAD ',
+    'INR': 'INR ',
+    'SGD': 'SGD ',
+  };
 
   BudgetData _data = BudgetData.defaultState();
   bool _loading = true;
@@ -304,6 +303,8 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
   bool _monthlyShowSaved = true;
   bool _monthlyShowRate = true;
   int _selectedNavIndex = 0;
+  String _currencyCode = 'PHP';
+  String? _profilePhotoUrl;
 
   static const List<String> _navLabels = [
     'Overview',
@@ -342,6 +343,7 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
   void initState() {
     super.initState();
     _load();
+    _loadProfilePreview();
     _searchController.addListener(() => setState(() {}));
   }
 
@@ -360,6 +362,7 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
     try {
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getString(_scopedStorageKey());
+      final storedCurrency = prefs.getString(_scopedCurrencyKey());
 
       // One-time cleanup: remove old shared key so users do not inherit
       // previous account data from older app versions.
@@ -374,11 +377,58 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
         _expenseCategory = _data.categories.keys.isNotEmpty
             ? _data.categories.keys.first
             : 'General';
+        _currencyCode = _currencySymbols.containsKey(storedCurrency)
+            ? storedCurrency!
+            : 'PHP';
         _loading = false;
       });
     } catch (e) {
       setState(() => _loading = false);
     }
+  }
+
+  Future<void> _loadProfilePreview() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      if (mounted) {
+        setState(() => _profilePhotoUrl = null);
+      }
+      return;
+    }
+
+    try {
+      final profile = await FirebaseService.getUserProfile(user.uid);
+      final fromFirestore = (profile?['photoUrl'] as String?)?.trim();
+      final nextPhoto =
+          (fromFirestore != null && fromFirestore.isNotEmpty) ? fromFirestore : user.photoURL;
+      if (!mounted) return;
+      setState(() => _profilePhotoUrl = nextPhoto);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _profilePhotoUrl = user.photoURL);
+    }
+  }
+
+  String _scopedCurrencyKey() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null || uid.isEmpty) {
+      return '${_currencyStoragePrefix}_guest';
+    }
+    return '${_currencyStoragePrefix}_$uid';
+  }
+
+  Future<void> _setCurrencyCode(String nextCode) async {
+    if (!_currencySymbols.containsKey(nextCode)) {
+      return;
+    }
+
+    setState(() => _currencyCode = nextCode);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_scopedCurrencyKey(), nextCode);
+  }
+
+  Future<void> _logoutFromSettings() async {
+    await AuthService.signOut();
   }
 
   void _syncCategoryLineColors() {
@@ -449,7 +499,10 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
     return '${_storageKey}_$uid';
   }
 
-  String _money(num value) => _moneyFormat.format(value);
+  String _money(num value) {
+    final symbol = _currencySymbols[_currencyCode] ?? 'PHP ';
+    return NumberFormat.currency(symbol: symbol, decimalDigits: 0).format(value);
+  }
 
   String _monthKey(DateTime dt) => DateFormat('yyyy-MM').format(dt);
 
@@ -686,16 +739,13 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
   }
 
-  void _openProfilePage() {
-    Navigator.of(context).push(
+  Future<void> _openProfilePage() async {
+    await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => ProfilePage(
-          isDarkMode: widget.isDarkMode,
-          onToggleDarkMode: widget.onToggleDarkMode,
-          onLogout: () {},
-        ),
+        builder: (_) => const ProfilePage(),
       ),
     );
+    await _loadProfilePreview();
   }
 
   void _openSettingsPage() {
@@ -704,6 +754,10 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
         builder: (_) => SettingsPage(
           isDarkMode: widget.isDarkMode,
           onToggleDarkMode: widget.onToggleDarkMode,
+          currencyCode: _currencyCode,
+          currencySymbols: _currencySymbols,
+          onCurrencyChanged: _setCurrencyCode,
+          onLogout: _logoutFromSettings,
         ),
       ),
     );
@@ -722,9 +776,21 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
   }
 
   Widget _buildProfileButton() {
+    final hasPhoto = _profilePhotoUrl != null && _profilePhotoUrl!.isNotEmpty;
     return IconButton(
       onPressed: _openProfilePage,
-      icon: const Icon(Icons.account_circle_outlined),
+      icon: CircleAvatar(
+        radius: 14,
+        backgroundColor: Colors.white.withOpacity(0.2),
+        backgroundImage: hasPhoto ? NetworkImage(_profilePhotoUrl!) : null,
+        child: hasPhoto
+            ? null
+            : const Icon(
+                Icons.person_outline,
+                size: 18,
+                color: Colors.white,
+              ),
+      ),
       style: IconButton.styleFrom(
         backgroundColor: const Color(0xFF1A7A59),
         foregroundColor: Colors.white,
@@ -2617,27 +2683,168 @@ class ExpenseTx {
   }
 }
 
-class SettingsPage extends StatelessWidget {
+class SettingsPage extends StatefulWidget {
   const SettingsPage({
     super.key,
     required this.isDarkMode,
     required this.onToggleDarkMode,
+    required this.currencyCode,
+    required this.currencySymbols,
+    required this.onCurrencyChanged,
+    required this.onLogout,
   });
 
   final bool isDarkMode;
   final ValueChanged<bool> onToggleDarkMode;
+  final String currencyCode;
+  final Map<String, String> currencySymbols;
+  final ValueChanged<String> onCurrencyChanged;
+  final Future<void> Function() onLogout;
+
+  @override
+  State<SettingsPage> createState() => _SettingsPageState();
+}
+
+class _SettingsPageState extends State<SettingsPage> {
+  late String _selectedCurrency;
+  static const Map<String, String> _currencyNames = {
+    'PHP': 'Philippine Peso',
+    'USD': 'US Dollar',
+    'EUR': 'Euro',
+    'GBP': 'British Pound',
+    'JPY': 'Japanese Yen',
+    'AUD': 'Australian Dollar',
+    'CAD': 'Canadian Dollar',
+    'INR': 'Indian Rupee',
+    'SGD': 'Singapore Dollar',
+  };
+  static const Map<String, String> _countryCodes = {
+    'PHP': 'PH',
+    'USD': 'US',
+    'EUR': 'EU',
+    'GBP': 'GB',
+    'JPY': 'JP',
+    'AUD': 'AU',
+    'CAD': 'CA',
+    'INR': 'IN',
+    'SGD': 'SG',
+  };
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedCurrency = widget.currencyCode;
+  }
+
+  @override
+  void didUpdateWidget(covariant SettingsPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.currencyCode != widget.currencyCode) {
+      _selectedCurrency = widget.currencyCode;
+    }
+  }
+
+  Future<void> _openCurrencyPicker() async {
+    final options = widget.currencySymbols.entries
+        .map(
+          (entry) => _CurrencyOption(
+            code: entry.key,
+            symbol: entry.value.trim(),
+            name: _currencyNames[entry.key] ?? entry.key,
+            countryCode: _countryCodes[entry.key] ?? entry.key,
+          ),
+        )
+        .toList();
+
+    final selected = await showDialog<String>(
+      context: context,
+      builder: (context) {
+        return _CurrencyPickerDialog(
+          options: options,
+          initialCode: _selectedCurrency,
+        );
+      },
+    );
+
+    if (selected == null || selected == _selectedCurrency) {
+      return;
+    }
+
+    setState(() => _selectedCurrency = selected);
+    widget.onCurrencyChanged(selected);
+  }
+
+  Future<void> _openPrivacySettings() async {
+    final user = FirebaseAuth.instance.currentUser;
+    final email = user?.email;
+    if (email == null || email.trim().isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No email found for this account.')),
+      );
+      return;
+    }
+
+    try {
+      await AuthService.resetPassword(email: email.trim());
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Password reset link sent to $email')),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to open privacy actions right now.')),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: ListView(
         padding: const EdgeInsets.all(12),
         children: [
           Card(
+            child: ListTile(
+              leading: Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: scheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  Icons.currency_exchange,
+                  color: scheme.onPrimaryContainer,
+                ),
+              ),
+              title: const Text('Currency'),
+              subtitle: const Text('Select how amounts are displayed'),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _selectedCurrency,
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  const Icon(Icons.chevron_right),
+                ],
+              ),
+              onTap: _openCurrencyPicker,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Card(
             child: SwitchListTile.adaptive(
-              value: isDarkMode,
-              onChanged: onToggleDarkMode,
+              value: widget.isDarkMode,
+              onChanged: widget.onToggleDarkMode,
               title: const Text('Dark mode'),
               subtitle: const Text('Switch app appearance'),
             ),
@@ -2645,19 +2852,35 @@ class SettingsPage extends StatelessWidget {
           const SizedBox(height: 8),
           Card(
             child: ListTile(
-              leading: const Icon(Icons.person_outline),
-              title: const Text('Edit Profile'),
-              subtitle: const Text('Update photo, name, and role'),
-              onTap: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => ProfilePage(
-                      isDarkMode: isDarkMode,
-                      onToggleDarkMode: onToggleDarkMode,
-                      onLogout: () {},
-                    ),
-                  ),
-                );
+              leading: Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: scheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  Icons.shield_outlined,
+                  color: scheme.onPrimaryContainer,
+                ),
+              ),
+              title: const Text('Privacy'),
+              subtitle: const Text('Change your password and account security'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: _openPrivacySettings,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.logout),
+              title: const Text('Log Out'),
+              subtitle: const Text('Sign out of this account'),
+              onTap: () async {
+                await widget.onLogout();
+                if (context.mounted) {
+                  Navigator.of(context).pop();
+                }
               },
             ),
           ),
@@ -2667,17 +2890,166 @@ class SettingsPage extends StatelessWidget {
   }
 }
 
-class ProfilePage extends StatefulWidget {
-  const ProfilePage({
-    super.key,
-    required this.isDarkMode,
-    required this.onToggleDarkMode,
-    required this.onLogout,
+class _CurrencyOption {
+  const _CurrencyOption({
+    required this.code,
+    required this.name,
+    required this.symbol,
+    required this.countryCode,
   });
 
-  final bool isDarkMode;
-  final ValueChanged<bool> onToggleDarkMode;
-  final VoidCallback onLogout;
+  final String code;
+  final String name;
+  final String symbol;
+  final String countryCode;
+}
+
+class _CurrencyPickerDialog extends StatefulWidget {
+  const _CurrencyPickerDialog({
+    required this.options,
+    required this.initialCode,
+  });
+
+  final List<_CurrencyOption> options;
+  final String initialCode;
+
+  @override
+  State<_CurrencyPickerDialog> createState() => _CurrencyPickerDialogState();
+}
+
+class _CurrencyPickerDialogState extends State<_CurrencyPickerDialog> {
+  final TextEditingController _searchController = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final normalized = _query.trim().toLowerCase();
+    final filtered = widget.options.where((option) {
+      if (normalized.isEmpty) {
+        return true;
+      }
+      return option.code.toLowerCase().contains(normalized) ||
+          option.name.toLowerCase().contains(normalized) ||
+          option.symbol.toLowerCase().contains(normalized);
+    }).toList();
+
+    return Dialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 360, maxHeight: 520),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.arrow_back_ios_new, size: 18),
+                    tooltip: 'Back',
+                    onPressed: () => Navigator.of(context).pop(),
+                    style: IconButton.styleFrom(
+                      minimumSize: const Size(34, 34),
+                    ),
+                  ),
+                  const SizedBox(width: 2),
+                  Text(
+                    'Choose a currency',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _searchController,
+                onChanged: (value) => setState(() => _query = value),
+                decoration: InputDecoration(
+                  prefixIcon: const Icon(Icons.search),
+                  hintText: 'Search',
+                  filled: true,
+                  fillColor: scheme.surfaceContainerHighest.withValues(alpha: 0.55),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: scheme.primary.withValues(alpha: 0.5)),
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Expanded(
+                child: filtered.isEmpty
+                    ? Center(
+                        child: Text(
+                          'No currencies match your search.',
+                          style: TextStyle(color: scheme.onSurfaceVariant),
+                        ),
+                      )
+                    : ListView.separated(
+                        itemCount: filtered.length,
+                        separatorBuilder: (_, __) => Divider(
+                          color: scheme.outlineVariant.withValues(alpha: 0.45),
+                          height: 1,
+                        ),
+                        itemBuilder: (context, index) {
+                          final option = filtered[index];
+                          final selected = option.code == widget.initialCode;
+                          return ListTile(
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 2,
+                              vertical: 4,
+                            ),
+                            leading: CircleAvatar(
+                              radius: 16,
+                              backgroundColor: scheme.surfaceContainerHighest,
+                              child: ClipOval(
+                                child: CountryFlag.fromCountryCode(
+                                  option.countryCode,
+                                ),
+                              ),
+                            ),
+                            title: Text(
+                              option.code,
+                              style: const TextStyle(fontWeight: FontWeight.w700),
+                            ),
+                            subtitle: Text(option.name),
+                            trailing: selected
+                                ? const Icon(
+                                    Icons.check,
+                                    color: Color(0xFF1A7A59),
+                                  )
+                                : null,
+                            onTap: () => Navigator.of(context).pop(option.code),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class ProfilePage extends StatefulWidget {
+  const ProfilePage({super.key});
 
   @override
   State<ProfilePage> createState() => _ProfilePageState();
@@ -2689,8 +3061,14 @@ class _ProfilePageState extends State<ProfilePage> {
   final _picker = ImagePicker();
 
   String? _photoUrl;
+  String? _coverPhotoUrl;
+  Uint8List? _pendingPhotoBytes;
+  Uint8List? _pendingCoverBytes;
   bool _loading = true;
   bool _saving = false;
+  bool _uploadingPhoto = false;
+  bool _uploadingCover = false;
+  bool _isEditing = false;
 
   @override
   void initState() {
@@ -2719,27 +3097,42 @@ class _ProfilePageState extends State<ProfilePage> {
       final fullName = (profile?['fullName'] as String?)?.trim();
       final role = (profile?['role'] as String?)?.trim();
       final photoUrl = (profile?['photoUrl'] as String?)?.trim();
+      final coverPhotoUrl = (profile?['coverPhotoUrl'] as String?)?.trim();
 
       if (!mounted) return;
       setState(() {
         _nameController.text =
             (fullName != null && fullName.isNotEmpty)
                 ? fullName
-                : (user.displayName ?? '');
+                : ((user.displayName ?? '').trim().isNotEmpty
+                    ? user.displayName!.trim()
+                    : 'User');
         _roleController.text =
             (role != null && role.isNotEmpty) ? role : 'Student';
         _photoUrl =
             (photoUrl != null && photoUrl.isNotEmpty)
                 ? photoUrl
                 : user.photoURL;
+        _coverPhotoUrl =
+            (coverPhotoUrl != null && coverPhotoUrl.isNotEmpty)
+                ? coverPhotoUrl
+                : null;
+        _pendingPhotoBytes = null;
+        _pendingCoverBytes = null;
         _loading = false;
       });
     } catch (_) {
       if (!mounted) return;
       setState(() {
-        _nameController.text = user.displayName ?? '';
+        _nameController.text =
+            (user.displayName ?? '').trim().isNotEmpty
+                ? user.displayName!.trim()
+                : 'User';
         _roleController.text = 'Student';
         _photoUrl = user.photoURL;
+        _coverPhotoUrl = null;
+        _pendingPhotoBytes = null;
+        _pendingCoverBytes = null;
         _loading = false;
       });
     }
@@ -2749,37 +3142,75 @@ class _ProfilePageState extends State<ProfilePage> {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
-    final picked = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 75);
+    final previousPhotoUrl = _photoUrl;
+    final picked = await _picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 65,
+      maxWidth: 1080,
+      maxHeight: 1080,
+    );
     if (picked == null) {
       return;
     }
 
-    setState(() => _saving = true);
+    final previewBytes = await picked.readAsBytes();
+    if (!mounted) return;
+
+    setState(() {
+      _pendingPhotoBytes = previewBytes;
+      _uploadingPhoto = true;
+    });
     try {
       final url = await FirebaseService.uploadProfileImage(
         userId: user.uid,
         filePath: picked.path,
-      );
+      ).timeout(const Duration(seconds: 35), onTimeout: () => null);
 
       if (url == null || url.isEmpty) {
         if (mounted) {
+          setState(() {
+            _pendingPhotoBytes = null;
+            _photoUrl = previousPhotoUrl;
+          });
+        }
+        if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Unable to upload photo. Please try again.')),
+            const SnackBar(content: Text('Unable to upload photo right now. Please try again.')),
           );
         }
         return;
       }
 
-      setState(() => _photoUrl = url);
+      if (mounted) {
+        setState(() {
+          _photoUrl = url;
+          _pendingPhotoBytes = null;
+        });
+      }
+      final resolvedName = _nameController.text.trim().isEmpty
+          ? (((user.displayName ?? '').trim().isNotEmpty)
+              ? user.displayName!.trim()
+            : 'User')
+          : _nameController.text.trim();
+      final resolvedRole = _roleController.text.trim().isEmpty
+          ? 'Student'
+          : _roleController.text.trim();
       await AuthService.updateUserProfile(
-        fullName: _nameController.text.trim().isEmpty
-            ? (user.displayName ?? 'User')
-            : _nameController.text.trim(),
+        fullName: resolvedName,
         photoUrl: url,
       );
+      final userData = <String, dynamic>{
+        'fullName': resolvedName,
+        'role': resolvedRole,
+        'photoUrl': url,
+        'lastUpdated': DateTime.now(),
+      };
+      if (_coverPhotoUrl != null && _coverPhotoUrl!.trim().isNotEmpty) {
+        userData['coverPhotoUrl'] = _coverPhotoUrl;
+      }
       await FirebaseService.saveUserProfile(
         userId: user.uid,
-        userData: {'photoUrl': url},
+        userData: userData,
       );
 
       if (mounted) {
@@ -2787,9 +3218,18 @@ class _ProfilePageState extends State<ProfilePage> {
           const SnackBar(content: Text('Profile photo updated.')),
         );
       }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _pendingPhotoBytes = null;
+        _photoUrl = previousPhotoUrl;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Photo update failed: $e')),
+      );
     } finally {
       if (mounted) {
-        setState(() => _saving = false);
+        setState(() => _uploadingPhoto = false);
       }
     }
   }
@@ -2813,20 +3253,27 @@ class _ProfilePageState extends State<ProfilePage> {
         fullName: fullName,
         photoUrl: _photoUrl,
       );
+      final userData = <String, dynamic>{
+        'fullName': fullName,
+        'role': role,
+        'lastUpdated': DateTime.now(),
+      };
+      if (_photoUrl != null && _photoUrl!.trim().isNotEmpty) {
+        userData['photoUrl'] = _photoUrl;
+      }
+      if (_coverPhotoUrl != null && _coverPhotoUrl!.trim().isNotEmpty) {
+        userData['coverPhotoUrl'] = _coverPhotoUrl;
+      }
       await FirebaseService.saveUserProfile(
         userId: user.uid,
-        userData: {
-          'fullName': fullName,
-          'role': role,
-          'photoUrl': _photoUrl,
-          'lastUpdated': DateTime.now(),
-        },
+        userData: userData,
       );
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Profile updated successfully.')),
         );
+        setState(() => _isEditing = false);
       }
     } finally {
       if (mounted) {
@@ -2836,10 +3283,111 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   ImageProvider<Object>? _photoProvider() {
+    if (_pendingPhotoBytes != null && _pendingPhotoBytes!.isNotEmpty) {
+      return MemoryImage(_pendingPhotoBytes!);
+    }
     if (_photoUrl == null || _photoUrl!.isEmpty) {
       return null;
     }
     return NetworkImage(_photoUrl!);
+  }
+
+  ImageProvider<Object>? _coverProvider() {
+    if (_pendingCoverBytes != null && _pendingCoverBytes!.isNotEmpty) {
+      return MemoryImage(_pendingCoverBytes!);
+    }
+    if (_coverPhotoUrl == null || _coverPhotoUrl!.isEmpty) {
+      return null;
+    }
+    return NetworkImage(_coverPhotoUrl!);
+  }
+
+  Future<void> _pickAndUploadCoverPhoto() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final previousCoverUrl = _coverPhotoUrl;
+    final picked = await _picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 70,
+      maxWidth: 1400,
+      maxHeight: 1400,
+    );
+    if (picked == null) return;
+
+    final previewBytes = await picked.readAsBytes();
+    if (!mounted) return;
+
+    setState(() {
+      _pendingCoverBytes = previewBytes;
+      _uploadingCover = true;
+    });
+
+    try {
+      final url = await FirebaseService.uploadCoverImage(
+        userId: user.uid,
+        filePath: picked.path,
+      ).timeout(const Duration(seconds: 35), onTimeout: () => null);
+
+      if (url == null || url.isEmpty) {
+        setState(() {
+          _pendingCoverBytes = null;
+          _coverPhotoUrl = previousCoverUrl;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unable to upload background right now.')),
+        );
+        return;
+      }
+
+      setState(() {
+        _coverPhotoUrl = url;
+        _pendingCoverBytes = null;
+      });
+      final resolvedName = _nameController.text.trim().isEmpty
+          ? (((user.displayName ?? '').trim().isNotEmpty)
+              ? user.displayName!.trim()
+            : 'User')
+          : _nameController.text.trim();
+      final resolvedRole = _roleController.text.trim().isEmpty
+          ? 'Student'
+          : _roleController.text.trim();
+      await AuthService.updateUserProfile(
+        fullName: resolvedName,
+        photoUrl: _photoUrl,
+      );
+      final userData = <String, dynamic>{
+        'fullName': resolvedName,
+        'role': resolvedRole,
+        'coverPhotoUrl': url,
+        'lastUpdated': DateTime.now(),
+      };
+      if (_photoUrl != null && _photoUrl!.trim().isNotEmpty) {
+        userData['photoUrl'] = _photoUrl;
+      }
+      await FirebaseService.saveUserProfile(
+        userId: user.uid,
+        userData: userData,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Background updated.')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _pendingCoverBytes = null;
+        _coverPhotoUrl = previousCoverUrl;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Background update failed: $e')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _uploadingCover = false);
+      }
+    }
   }
 
   @override
@@ -2856,65 +3404,138 @@ class _ProfilePageState extends State<ProfilePage> {
         title: const Text('Profile'),
         actions: [
           IconButton(
-            tooltip: widget.isDarkMode ? 'Light mode' : 'Dark mode',
-            onPressed: () => widget.onToggleDarkMode(!widget.isDarkMode),
-            icon: Icon(
-              widget.isDarkMode
-                  ? Icons.light_mode_outlined
-                  : Icons.dark_mode_outlined,
-            ),
+            tooltip: _isEditing ? 'Cancel edit' : 'Edit profile',
+            onPressed: (_saving || _uploadingPhoto || _uploadingCover)
+                ? null
+                : () => setState(() {
+                      _isEditing = !_isEditing;
+                      if (!_isEditing) {
+                        _loadProfile();
+                      }
+                    }),
+            icon: Icon(_isEditing ? Icons.close : Icons.edit_outlined),
           ),
         ],
       ),
       body: ListView(
         padding: const EdgeInsets.all(12),
         children: [
-          Card(
+          Container(
+            decoration: BoxDecoration(
+              color: scheme.surface,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.5)),
+            ),
             child: Padding(
-              padding: const EdgeInsets.all(14),
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      CircleAvatar(
-                        radius: 32,
+                  Container(
+                    height: 120,
+                    decoration: BoxDecoration(
+                      image: _coverProvider() != null
+                          ? DecorationImage(
+                              image: _coverProvider()!,
+                              fit: BoxFit.cover,
+                            )
+                          : null,
+                      gradient: _coverProvider() == null
+                          ? LinearGradient(
+                              colors: [scheme.primary, scheme.primary.withValues(alpha: 0.78)],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            )
+                          : null,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: _coverProvider() != null
+                        ? DecoratedBox(
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(14),
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: [
+                                  Colors.black.withValues(alpha: 0.12),
+                                  Colors.black.withValues(alpha: 0.28),
+                                ],
+                              ),
+                            ),
+                          )
+                        : null,
+                  ),
+                  Transform.translate(
+                    offset: const Offset(0, -30),
+                    child: CircleAvatar(
+                      radius: 42,
+                      backgroundColor: Colors.white,
+                      child: CircleAvatar(
+                        radius: 39,
                         backgroundColor: scheme.primaryContainer,
                         backgroundImage: _photoProvider(),
                         child: _photoProvider() == null
-                            ? Icon(Icons.person, color: scheme.primary)
+                            ? Icon(Icons.person, size: 34, color: scheme.primary)
                             : null,
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              _nameController.text.isNotEmpty
-                                  ? _nameController.text
-                                  : 'User',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .titleMedium
-                                  ?.copyWith(fontWeight: FontWeight.w700),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              user?.email ?? 'No email',
-                              style: TextStyle(color: scheme.onSurfaceVariant),
-                            ),
-                          ],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    _nameController.text.trim().isEmpty
+                        ? 'User'
+                        : _nameController.text.trim(),
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
                         ),
-                      ),
-                    ],
                   ),
-                  const SizedBox(height: 10),
-                  OutlinedButton.icon(
-                    onPressed: _saving ? null : _pickAndUploadPhoto,
-                    icon: const Icon(Icons.photo_camera_outlined),
-                    label: const Text('Change profile photo'),
+                  const SizedBox(height: 2),
+                  Text(
+                    _roleController.text.trim().isEmpty
+                        ? 'Student'
+                        : _roleController.text.trim(),
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: scheme.onSurfaceVariant),
                   ),
+                  const SizedBox(height: 12),
+                  if (_isEditing)
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      alignment: WrapAlignment.center,
+                      children: [
+                        FilledButton.icon(
+                          onPressed: (_uploadingPhoto || _saving)
+                              ? null
+                              : _pickAndUploadPhoto,
+                          icon: Icon(
+                            _uploadingPhoto
+                                ? Icons.cloud_upload_outlined
+                                : Icons.photo_camera_outlined,
+                          ),
+                          label: Text(
+                            _uploadingPhoto
+                                ? 'Uploading photo...'
+                                : 'Change profile photo',
+                          ),
+                        ),
+                        FilledButton.icon(
+                          onPressed: (_uploadingCover || _saving)
+                              ? null
+                              : _pickAndUploadCoverPhoto,
+                          icon: Icon(
+                            _uploadingCover
+                                ? Icons.cloud_upload_outlined
+                                : Icons.wallpaper_outlined,
+                          ),
+                          label: Text(
+                            _uploadingCover
+                                ? 'Uploading background...'
+                                : 'Change background',
+                          ),
+                        ),
+                      ],
+                    ),
                 ],
               ),
             ),
@@ -2923,46 +3544,77 @@ class _ProfilePageState extends State<ProfilePage> {
           Card(
             child: Padding(
               padding: const EdgeInsets.all(14),
-              child: Column(
-                children: [
-                  TextField(
-                    controller: _nameController,
-                    decoration: const InputDecoration(
-                      labelText: 'Full name',
-                      prefixIcon: Icon(Icons.person_outline),
+              child: _isEditing
+                  ? Column(
+                      children: [
+                        TextField(
+                          controller: _nameController,
+                          decoration: const InputDecoration(
+                            labelText: 'Full name',
+                            prefixIcon: Icon(Icons.person_outline),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        TextField(
+                          controller: _roleController,
+                          decoration: const InputDecoration(
+                            labelText: 'Role',
+                            prefixIcon: Icon(Icons.badge_outlined),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        TextFormField(
+                          initialValue: user?.email ?? '',
+                          enabled: false,
+                          decoration: const InputDecoration(
+                            labelText: 'Email address',
+                            prefixIcon: Icon(Icons.email_outlined),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        FilledButton.icon(
+                          onPressed: _saving ? null : _saveProfile,
+                          icon: const Icon(Icons.save_outlined),
+                          label: Text(_saving ? 'Saving...' : 'Save profile'),
+                        ),
+                      ],
+                    )
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: const Icon(Icons.person_outline),
+                          title: const Text('Full name'),
+                          subtitle: Text(
+                            _nameController.text.trim().isEmpty
+                                ? 'Not set'
+                                : _nameController.text.trim(),
+                          ),
+                        ),
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: const Icon(Icons.badge_outlined),
+                          title: const Text('Role'),
+                          subtitle: Text(
+                            _roleController.text.trim().isEmpty
+                                ? 'Not set'
+                                : _roleController.text.trim(),
+                          ),
+                        ),
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: const Icon(Icons.email_outlined),
+                          title: const Text('Email address'),
+                          subtitle: Text(user?.email ?? 'No email'),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Tap the edit icon to update your details.',
+                          style: TextStyle(color: scheme.onSurfaceVariant),
+                        ),
+                      ],
                     ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: _roleController,
-                    decoration: const InputDecoration(
-                      labelText: 'Role',
-                      prefixIcon: Icon(Icons.badge_outlined),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  FilledButton.icon(
-                    onPressed: _saving ? null : _saveProfile,
-                    icon: const Icon(Icons.save_outlined),
-                    label: Text(_saving ? 'Saving...' : 'Save profile'),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Card(
-            child: ListTile(
-              leading: const Icon(Icons.logout),
-              title: const Text('Log Out'),
-              subtitle: const Text('Sign out of this account'),
-              onTap: () async {
-                await AuthService.signOut();
-                if (mounted) {
-                  Navigator.pop(context);
-                  widget.onLogout();
-                }
-              },
             ),
           ),
         ],

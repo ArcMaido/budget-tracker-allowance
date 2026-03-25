@@ -7,10 +7,12 @@ class LoginPage extends StatefulWidget {
     super.key,
     required this.isDarkMode,
     required this.onToggleDarkMode,
+    this.onSignedIn,
   });
 
   final bool isDarkMode;
   final ValueChanged<bool> onToggleDarkMode;
+  final VoidCallback? onSignedIn;
 
   @override
   State<LoginPage> createState() => _LoginPageState();
@@ -25,9 +27,21 @@ class _LoginPageState extends State<LoginPage> {
 
   String _friendlyAuthError(Object error, {required bool isGoogle}) {
     final raw = error.toString();
+    if (raw.contains('user-not-found') ||
+        raw.contains('wrong-password') ||
+        raw.contains('invalid-credential') ||
+        raw.contains('INVALID_LOGIN_CREDENTIALS')) {
+      return 'Invalid email or password. Please try again.';
+    }
+    if (raw.contains('invalid-email')) {
+      return 'Please enter a valid email address.';
+    }
+    if (raw.contains('too-many-requests')) {
+      return 'Too many failed attempts. Please wait a moment and try again.';
+    }
     if (raw.contains('PigeonUserDetails') ||
         raw.contains("List<Object> is not a subtype")) {
-      return 'Auth plugin sync issue detected. Please restart the app and try again.';
+      return 'Temporary auth sync issue. Please try signing in again.';
     }
     if (raw.contains('ApiException:10') || raw.contains('ApiException: 10')) {
       return 'Google sign-in is not fully configured yet. Complete SHA setup in Firebase and rebuild the app.';
@@ -61,6 +75,7 @@ class _LoginPageState extends State<LoginPage> {
         email: _emailController.text.trim(),
         password: _passwordController.text,
       );
+      widget.onSignedIn?.call();
     } catch (e) {
       setState(() => _errorMessage = _friendlyAuthError(e, isGoogle: false));
     } finally {

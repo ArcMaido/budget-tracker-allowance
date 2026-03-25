@@ -5,6 +5,18 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/services.dart';
 
+class GoogleSignupPrefill {
+  const GoogleSignupPrefill({
+    required this.email,
+    this.displayName,
+    this.photoUrl,
+  });
+
+  final String email;
+  final String? displayName;
+  final String? photoUrl;
+}
+
 class AuthService {
   static final FirebaseAuth _auth = FirebaseAuth.instance;
   static final GoogleSignIn _googleSignIn = GoogleSignIn();
@@ -22,6 +34,7 @@ class AuthService {
     required String email,
     required String password,
     required String fullName,
+    String? photoUrl,
   }) async {
     try {
       final userCredential = await _auth.createUserWithEmailAndPassword(
@@ -31,16 +44,23 @@ class AuthService {
 
       if (userCredential.user != null) {
         await userCredential.user!.updateDisplayName(fullName);
-        await _saveUserProfile(userCredential.user!, fullName, email, isNewUser: true);
-        await _syncToLocalStorage(userCredential.user!);
+        if (photoUrl != null && photoUrl.trim().isNotEmpty) {
+          await userCredential.user!.updatePhotoURL(photoUrl.trim());
+        }
+        await userCredential.user!.reload();
+        final refreshedUser = _auth.currentUser ?? userCredential.user!;
+        await _saveUserProfile(
+          refreshedUser,
+          fullName,
+          email,
+          isNewUser: true,
+          photoUrl: photoUrl,
+        );
+        await _syncToLocalStorage(refreshedUser);
         
         // Mark as new user in local preferences
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('isNewUser', true);
-
-        // Force next app state to return to login after successful sign-up.
-        await _setForceLoginAfterSignup(true);
-        await signOut();
       }
       return userCredential;
     } on FirebaseAuthException catch (e) {
@@ -62,18 +82,21 @@ class AuthService {
 
         if (fallback.user != null) {
           await fallback.user!.updateDisplayName(fullName);
+          if (photoUrl != null && photoUrl.trim().isNotEmpty) {
+            await fallback.user!.updatePhotoURL(photoUrl.trim());
+          }
+          await fallback.user!.reload();
+          final refreshedFallback = _auth.currentUser ?? fallback.user!;
           await _saveUserProfile(
-            fallback.user!,
+            refreshedFallback,
             fullName,
             email,
             isNewUser: true,
+            photoUrl: photoUrl,
           );
-          await _syncToLocalStorage(fallback.user!);
+          await _syncToLocalStorage(refreshedFallback);
           final prefs = await SharedPreferences.getInstance();
           await prefs.setBool('isNewUser', true);
-
-          await _setForceLoginAfterSignup(true);
-          await signOut();
           return fallback;
         }
       }
@@ -104,8 +127,6 @@ class AuthService {
     }
 
     await linkEmailPasswordToCurrentUser(password: password);
-    await _setForceLoginAfterSignup(true);
-    await signOut();
   }
 
   // Sign in with email and password
@@ -119,11 +140,57 @@ class AuthService {
         password: password,
       );
       if (userCredential.user != null) {
-        await _syncToLocalStorage(userCredential.user!);
+        User syncedUser = userCredential.user!;
+        try {
+          final profileDoc =
+              await _firestore.collection('users').doc(userCredential.user!.uid).get();
+          final profile = profileDoc.data();
+          final storedName = (profile?['fullName'] as String?)?.trim();
+          final storedPhoto = (profile?['photoUrl'] as String?)?.trim();
+
+          if (storedName != null && storedName.isNotEmpty) {
+            await userCredential.user!.updateDisplayName(storedName);
+          }
+          if (storedPhoto != null && storedPhoto.isNotEmpty) {
+            await userCredential.user!.updatePhotoURL(storedPhoto);
+          }
+          await userCredential.user!.reload();
+          syncedUser = _auth.currentUser ?? userCredential.user!;
+        } catch (_) {
+          // Ignore profile sync issues and keep sign-in successful.
+        }
+        await _syncToLocalStorage(syncedUser);
       }
       return userCredential;
     } on FirebaseAuthException catch (e) {
       print('SignIn error: ${e.message}');
+      rethrow;
+    } catch (e) {
+      final message = e.toString();
+      final isKnownPigeonCastIssue =
+          message.contains('PigeonUserDetails') ||
+          message.contains("List<Object> is not a subtype");
+
+      if (isKnownPigeonCastIssue) {
+        // On some plugin bridge failures, auth can still succeed on Firebase side.
+        final current = _auth.currentUser;
+        if (current != null &&
+            (current.email ?? '').toLowerCase() == email.trim().toLowerCase()) {
+          await _syncToLocalStorage(current);
+          return null;
+        }
+
+        // Retry once to recover from transient bridge sync issues.
+        final retryCredential = await _auth.signInWithEmailAndPassword(
+          email: email,
+          password: password,
+        );
+        if (retryCredential.user != null) {
+          await _syncToLocalStorage(retryCredential.user!);
+          return retryCredential;
+        }
+      }
+
       rethrow;
     }
   }
@@ -147,6 +214,7 @@ class AuthService {
           userCredential.user!,
           googleUser.displayName ?? 'Google User',
           googleUser.email,
+          photoUrl: userCredential.user!.photoURL,
         );
         await _syncToLocalStorage(userCredential.user!);
       }
@@ -167,6 +235,40 @@ class AuthService {
       rethrow;
     } catch (e) {
       print('Google SignIn error: $e');
+      rethrow;
+    }
+  }
+
+  // Pick a Google account and return email/profile info for sign-up prefill.
+  static Future<GoogleSignupPrefill?> pickGoogleEmailForSignup() async {
+    try {
+      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
+      if (googleUser == null) return null;
+
+      final prefill = GoogleSignupPrefill(
+        email: googleUser.email,
+        displayName: googleUser.displayName,
+        photoUrl: googleUser.photoUrl,
+      );
+
+      // Keep this flow as email prefill only, not an active Google-auth session.
+      try {
+        await _googleSignIn.signOut();
+      } catch (_) {}
+
+      return prefill;
+    } on PlatformException catch (e) {
+      final message = e.message ?? '';
+      final details = e.details?.toString() ?? '';
+      final raw = '$message $details';
+
+      if (raw.contains('ApiException: 10') || raw.contains('ApiException:10')) {
+        throw Exception(
+          'Google Sign-In is not fully configured for Android (OAuth/SHA). '
+          'Add SHA-1 and SHA-256 in Firebase, download updated google-services.json, and rebuild the app.',
+        );
+      }
+
       rethrow;
     }
   }
@@ -234,6 +336,38 @@ class AuthService {
     await prefs.setBool(_forceLoginAfterSignupKey, enabled);
   }
 
+  // Public helper used by UI flows that must always return users to Login.
+  static Future<void> markForceLoginAfterSignup() async {
+    await _setForceLoginAfterSignup(true);
+  }
+
+  // True when this email already supports password sign-in.
+  static Future<bool> isEmailRegisteredForPassword(String email) async {
+    try {
+      final methods = await _auth.fetchSignInMethodsForEmail(email.trim());
+      return methods.contains('password');
+    } catch (e) {
+      print('Error checking sign-in methods: $e');
+      return false;
+    }
+  }
+
+  // Attempts sign-out and confirms auth state is cleared.
+  static Future<bool> ensureSignedOut() async {
+    await signOut();
+    if (_auth.currentUser == null) {
+      return true;
+    }
+
+    try {
+      await _auth.signOut();
+    } catch (e) {
+      print('Ensure sign-out retry failed: $e');
+    }
+
+    return _auth.currentUser == null;
+  }
+
   // Returns true once, then clears the flag.
   static Future<bool> consumeForceLoginAfterSignup() async {
     final prefs = await SharedPreferences.getInstance();
@@ -251,6 +385,7 @@ class AuthService {
     String fullName,
     String email, {
     bool isNewUser = false,
+    String? photoUrl,
   }) async {
     try {
       await _firestore.collection('users').doc(user.uid).set(
@@ -258,6 +393,10 @@ class AuthService {
           'uid': user.uid,
           'email': email,
           'fullName': fullName,
+            'photoUrl':
+              (photoUrl != null && photoUrl.trim().isNotEmpty)
+                ? photoUrl.trim()
+                : user.photoURL,
           'createdAt': DateTime.now(),
           'lastLogin': DateTime.now(),
           'isNewUser': isNewUser,
@@ -323,8 +462,15 @@ class AuthService {
         if (photoUrl != null) {
           await user.updatePhotoURL(photoUrl);
         }
-        await _saveUserProfile(user, fullName, user.email ?? '');
-        await _syncToLocalStorage(user);
+        await user.reload();
+        final refreshedUser = _auth.currentUser ?? user;
+        await _saveUserProfile(
+          refreshedUser,
+          fullName,
+          refreshedUser.email ?? '',
+          photoUrl: photoUrl,
+        );
+        await _syncToLocalStorage(refreshedUser);
       }
     } catch (e) {
       print('Error updating profile: $e');
