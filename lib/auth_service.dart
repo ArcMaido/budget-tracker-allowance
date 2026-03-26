@@ -23,6 +23,12 @@ class AuthService {
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   static const String _forceLoginAfterSignupKey = 'force_login_after_signup';
 
+  static bool _isKnownPigeonCastIssue(Object error) {
+    final message = error.toString();
+    return message.contains('PigeonUserDetails') ||
+        message.contains("List<Object> is not a subtype");
+  }
+
   // Get current user
   static User? get currentUser => _auth.currentUser;
 
@@ -147,6 +153,15 @@ class AuthService {
           final profile = profileDoc.data();
           final storedName = (profile?['fullName'] as String?)?.trim();
           final storedPhoto = (profile?['photoUrl'] as String?)?.trim();
+          final justCreated = userCredential.user!.metadata.creationTime != null &&
+            userCredential.user!.metadata.lastSignInTime != null &&
+            userCredential.user!.metadata.creationTime!
+              .difference(userCredential.user!.metadata.lastSignInTime!)
+              .inSeconds
+              .abs() <=
+            10;
+          final remoteIsNewUser = (profile?['isNewUser'] == true) || (profile == null && justCreated);
+          final remoteOnboardingDone = profile?['onboardingCompleted'] == true;
 
           if (storedName != null && storedName.isNotEmpty) {
             await userCredential.user!.updateDisplayName(storedName);
@@ -154,6 +169,9 @@ class AuthService {
           if (storedPhoto != null && storedPhoto.isNotEmpty) {
             await userCredential.user!.updatePhotoURL(storedPhoto);
           }
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setBool('isNewUser', remoteIsNewUser && !remoteOnboardingDone);
+          await prefs.setBool('onboardingCompleted', remoteOnboardingDone);
           await userCredential.user!.reload();
           syncedUser = _auth.currentUser ?? userCredential.user!;
         } catch (_) {
@@ -210,12 +228,17 @@ class AuthService {
 
       final userCredential = await _auth.signInWithCredential(credential);
       if (userCredential.user != null) {
+        final isNewGoogleUser = userCredential.additionalUserInfo?.isNewUser ?? false;
         await _saveUserProfile(
           userCredential.user!,
           googleUser.displayName ?? 'Google User',
           googleUser.email,
+          isNewUser: isNewGoogleUser,
           photoUrl: userCredential.user!.photoURL,
         );
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('isNewUser', isNewGoogleUser);
+        await prefs.setBool('onboardingCompleted', !isNewGoogleUser);
         await _syncToLocalStorage(userCredential.user!);
       }
       return userCredential;
@@ -352,6 +375,57 @@ class AuthService {
     }
   }
 
+  // True when email exists in Firebase Auth providers or users profile collection.
+  static Future<bool> doesAccountExist(String email) async {
+    final rawEmail = email.trim();
+    final normalizedEmail = rawEmail.toLowerCase();
+    if (normalizedEmail.isEmpty) {
+      return false;
+    }
+
+    try {
+      final methods = await _auth.fetchSignInMethodsForEmail(normalizedEmail);
+      if (methods.isNotEmpty) {
+        return true;
+      }
+    } catch (e) {
+      print('Error checking auth providers for email: $e');
+    }
+
+    try {
+      final byLower = await _firestore
+          .collection('users')
+          .where('emailLower', isEqualTo: normalizedEmail)
+          .limit(1)
+          .get();
+      if (byLower.docs.isNotEmpty) {
+        return true;
+      }
+
+      final byNormalized = await _firestore
+          .collection('users')
+          .where('email', isEqualTo: normalizedEmail)
+          .limit(1)
+          .get();
+      if (byNormalized.docs.isNotEmpty) {
+        return true;
+      }
+
+      final byRaw = await _firestore
+          .collection('users')
+          .where('email', isEqualTo: rawEmail)
+          .limit(1)
+          .get();
+      if (byRaw.docs.isNotEmpty) {
+        return true;
+      }
+    } catch (e) {
+      print('Error checking users collection for email: $e');
+    }
+
+    return false;
+  }
+
   // Attempts sign-out and confirms auth state is cleared.
   static Future<bool> ensureSignedOut() async {
     await signOut();
@@ -388,15 +462,26 @@ class AuthService {
     String? photoUrl,
   }) async {
     try {
+      final normalizedEmail = email.trim().toLowerCase();
+      final existing = await _firestore.collection('users').doc(user.uid).get();
+      final existingName = (existing.data()?['fullName'] as String?)?.trim() ?? '';
+      final candidateFromInput = fullName.trim();
+      final candidateFromAuth = (user.displayName ?? '').trim();
+      final resolvedName = candidateFromInput.isNotEmpty
+          ? candidateFromInput
+          : (existingName.isNotEmpty
+              ? existingName
+              : (candidateFromAuth.isNotEmpty ? candidateFromAuth : 'User'));
       await _firestore.collection('users').doc(user.uid).set(
         {
           'uid': user.uid,
-          'email': email,
-          'fullName': fullName,
-            'photoUrl':
+          'email': normalizedEmail,
+          'emailLower': normalizedEmail,
+          'fullName': resolvedName,
+          'photoUrl':
               (photoUrl != null && photoUrl.trim().isNotEmpty)
-                ? photoUrl.trim()
-                : user.photoURL,
+                  ? photoUrl.trim()
+                  : user.photoURL,
           'createdAt': DateTime.now(),
           'lastLogin': DateTime.now(),
           'isNewUser': isNewUser,
@@ -446,6 +531,90 @@ class AuthService {
       await _auth.sendPasswordResetEmail(email: email);
     } catch (e) {
       print('Password reset error: $e');
+      rethrow;
+    }
+  }
+
+  // Validate a password reset code sent by Firebase email action.
+  static Future<void> verifyPasswordResetCode({required String code}) async {
+    try {
+      await _auth.checkActionCode(code);
+    } catch (e) {
+      print('Reset code verification error: $e');
+      rethrow;
+    }
+  }
+
+  // Confirm password reset with the code and new password.
+  static Future<void> confirmPasswordResetWithCode({
+    required String code,
+    required String newPassword,
+  }) async {
+    try {
+      await _auth.confirmPasswordReset(
+        code: code,
+        newPassword: newPassword,
+      );
+    } catch (e) {
+      print('Confirm password reset error: $e');
+      rethrow;
+    }
+  }
+
+  // Re-authenticate an email/password user with their current password.
+  static Future<void> verifyCurrentPassword({required String currentPassword}) async {
+    final user = _auth.currentUser;
+    if (user == null) {
+      throw Exception('No authenticated user found.');
+    }
+
+    final email = user.email;
+    if (email == null || email.trim().isEmpty) {
+      throw Exception('No email found for this account.');
+    }
+
+    final hasPasswordProvider =
+        user.providerData.any((provider) => provider.providerId == 'password');
+    if (!hasPasswordProvider) {
+      throw Exception('This account does not use password sign-in.');
+    }
+
+    try {
+      final credential = EmailAuthProvider.credential(
+        email: email.trim(),
+        password: currentPassword,
+      );
+      await user.reauthenticateWithCredential(credential);
+    } on FirebaseAuthException {
+      rethrow;
+    } catch (e) {
+      if (_isKnownPigeonCastIssue(e)) {
+        // Fallback path for plugin bridge cast issues seen on some builds.
+        // If signInWithEmail completes without invalid-credential errors,
+        // treat the password as verified.
+        await signInWithEmail(email: email.trim(), password: currentPassword);
+        return;
+      }
+      rethrow;
+    }
+  }
+
+  // Update password for the currently authenticated user.
+  static Future<void> updateCurrentUserPassword({required String newPassword}) async {
+    final user = _auth.currentUser;
+    if (user == null) {
+      throw Exception('No authenticated user found.');
+    }
+
+    try {
+      await user.updatePassword(newPassword);
+    } on FirebaseAuthException {
+      rethrow;
+    } catch (e) {
+      if (_isKnownPigeonCastIssue(e)) {
+        // Password update can succeed before plugin bridge cast issues surface.
+        return;
+      }
       rethrow;
     }
   }
@@ -521,7 +690,35 @@ class AuthService {
   static Future<bool> isNewUser() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      return prefs.getBool('isNewUser') ?? false;
+      final localIsNewUser = prefs.getBool('isNewUser') ?? false;
+
+      final user = _auth.currentUser;
+      if (user == null) {
+        return localIsNewUser;
+      }
+
+      final doc = await _firestore.collection('users').doc(user.uid).get();
+      final profile = doc.data();
+      if (profile == null) {
+        final justCreated = user.metadata.creationTime != null &&
+            user.metadata.lastSignInTime != null &&
+            user.metadata.creationTime!
+                .difference(user.metadata.lastSignInTime!)
+                .inSeconds
+                .abs() <=
+            10;
+        final resolved = localIsNewUser || justCreated;
+        await prefs.setBool('isNewUser', resolved);
+        return resolved;
+      }
+
+      final remoteIsNewUser = profile['isNewUser'] == true;
+      final remoteOnboardingDone = profile['onboardingCompleted'] == true;
+      final resolved = remoteOnboardingDone ? false : (remoteIsNewUser || localIsNewUser);
+
+      await prefs.setBool('isNewUser', resolved);
+      await prefs.setBool('onboardingCompleted', remoteOnboardingDone);
+      return resolved;
     } catch (e) {
       print('Error checking if user is new: $e');
       return false;

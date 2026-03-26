@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -179,24 +180,142 @@ class FirebaseService {
 
   // ==================== STORAGE ====================
 
+  static Future<String?> _uploadImageWithRetry({
+    required String userId,
+    required String filePath,
+    required String folder,
+    required String filePrefix,
+  }) async {
+    final file = File(filePath);
+    if (!await file.exists()) {
+      throw Exception('Selected image file was not found.');
+    }
+
+    FirebaseException? lastFirebaseError;
+    Object? lastError;
+
+    for (var attempt = 1; attempt <= 3; attempt++) {
+      try {
+        final stamp = DateTime.now().millisecondsSinceEpoch;
+        final ref = _storage
+            .ref()
+            .child('users/$userId/$folder/${filePrefix}_$stamp.jpg');
+        final task = ref.putFile(
+          file,
+          SettableMetadata(contentType: 'image/jpeg'),
+        );
+        await task.timeout(const Duration(seconds: 60));
+        final url = await ref.getDownloadURL();
+        if (url.trim().isNotEmpty) {
+          return url.trim();
+        }
+      } on FirebaseException catch (e) {
+        lastFirebaseError = e;
+        if (attempt < 3) {
+          await Future.delayed(Duration(milliseconds: 450 * attempt));
+        }
+      } catch (e) {
+        lastError = e;
+        if (attempt < 3) {
+          await Future.delayed(Duration(milliseconds: 450 * attempt));
+        }
+      }
+    }
+
+    if (lastFirebaseError != null) {
+      throw Exception(
+        'storage/${lastFirebaseError.code}: ${lastFirebaseError.message ?? 'Upload failed'}',
+      );
+    }
+
+    throw Exception('Upload failed${lastError != null ? ': $lastError' : ''}');
+  }
+
+  static Future<String?> _uploadImageBytesWithRetry({
+    required String userId,
+    required Uint8List bytes,
+    required String folder,
+    required String filePrefix,
+  }) async {
+    if (bytes.isEmpty) {
+      throw Exception('Image bytes are empty.');
+    }
+
+    FirebaseException? lastFirebaseError;
+    Object? lastError;
+
+    for (var attempt = 1; attempt <= 3; attempt++) {
+      try {
+        final stamp = DateTime.now().millisecondsSinceEpoch;
+        final ref = _storage
+            .ref()
+            .child('users/$userId/$folder/${filePrefix}_$stamp.jpg');
+        final task = ref.putData(
+          bytes,
+          SettableMetadata(contentType: 'image/jpeg'),
+        );
+        await task.timeout(const Duration(seconds: 60));
+        final url = await ref.getDownloadURL();
+        if (url.trim().isNotEmpty) {
+          return url.trim();
+        }
+      } on FirebaseException catch (e) {
+        lastFirebaseError = e;
+        if (attempt < 3) {
+          await Future.delayed(Duration(milliseconds: 450 * attempt));
+        }
+      } catch (e) {
+        lastError = e;
+        if (attempt < 3) {
+          await Future.delayed(Duration(milliseconds: 450 * attempt));
+        }
+      }
+    }
+
+    if (lastFirebaseError != null) {
+      throw Exception(
+        'storage/${lastFirebaseError.code}: ${lastFirebaseError.message ?? 'Upload failed'}',
+      );
+    }
+
+    throw Exception('Upload failed${lastError != null ? ': $lastError' : ''}');
+  }
+
   // Upload profile image
   static Future<String?> uploadProfileImage({
     required String userId,
     required String filePath,
   }) async {
     try {
-      final file = File(filePath);
-      final stamp = DateTime.now().millisecondsSinceEpoch;
-      final ref = _storage
-          .ref()
-          .child('users/$userId/profile_images/profile_$stamp.jpg');
-      final uploadTask = ref.putFile(file);
-      await uploadTask;
-      return await ref.getDownloadURL();
+      return await _uploadImageWithRetry(
+        userId: userId,
+        filePath: filePath,
+        folder: 'profile_images',
+        filePrefix: 'profile',
+      );
     } on FirebaseException catch (e) {
       throw Exception('storage/${e.code}: ${e.message ?? 'Upload failed'}');
     } catch (e) {
       print('Error uploading profile image: $e');
+      throw Exception('Upload failed: $e');
+    }
+  }
+
+  static Future<String?> uploadProfileImageBytes({
+    required String userId,
+    required Uint8List bytes,
+  }) async {
+    try {
+      return await _uploadImageBytesWithRetry(
+        userId: userId,
+        bytes: bytes,
+        folder: 'profile_images',
+        filePrefix: 'profile',
+      );
+    } on FirebaseException catch (e) {
+      throw Exception('storage/${e.code}: ${e.message ?? 'Upload failed'}');
+    } catch (e) {
+      print('Error uploading profile image bytes: $e');
       throw Exception('Upload failed: $e');
     }
   }
@@ -206,18 +325,35 @@ class FirebaseService {
     required String filePath,
   }) async {
     try {
-      final file = File(filePath);
-      final stamp = DateTime.now().millisecondsSinceEpoch;
-      final ref = _storage
-          .ref()
-          .child('users/$userId/cover_images/cover_$stamp.jpg');
-      final uploadTask = ref.putFile(file);
-      await uploadTask;
-      return await ref.getDownloadURL();
+      return await _uploadImageWithRetry(
+        userId: userId,
+        filePath: filePath,
+        folder: 'cover_images',
+        filePrefix: 'cover',
+      );
     } on FirebaseException catch (e) {
       throw Exception('storage/${e.code}: ${e.message ?? 'Upload failed'}');
     } catch (e) {
       print('Error uploading cover image: $e');
+      throw Exception('Upload failed: $e');
+    }
+  }
+
+  static Future<String?> uploadCoverImageBytes({
+    required String userId,
+    required Uint8List bytes,
+  }) async {
+    try {
+      return await _uploadImageBytesWithRetry(
+        userId: userId,
+        bytes: bytes,
+        folder: 'cover_images',
+        filePrefix: 'cover',
+      );
+    } on FirebaseException catch (e) {
+      throw Exception('storage/${e.code}: ${e.message ?? 'Upload failed'}');
+    } catch (e) {
+      print('Error uploading cover image bytes: $e');
       throw Exception('Upload failed: $e');
     }
   }

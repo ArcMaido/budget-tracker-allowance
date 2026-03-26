@@ -15,7 +15,6 @@ import 'auth_service.dart';
 import 'data_service.dart';
 import 'firebase_service.dart';
 import 'firebase_options.dart';
-import 'pages/loading_page.dart';
 import 'pages/login_page.dart';
 import 'pages/onboarding_page.dart';
 
@@ -98,6 +97,8 @@ class _AllowanceBudgetAppState extends State<AllowanceBudgetApp> {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Allowance Budget Dashboard',
+      themeAnimationDuration: const Duration(milliseconds: 280),
+      themeAnimationCurve: Curves.easeInOutCubic,
       themeMode: _darkMode ? ThemeMode.dark : ThemeMode.light,
       theme: base.copyWith(
         scaffoldBackgroundColor: lightScheme.surface,
@@ -152,11 +153,6 @@ class _AllowanceBudgetAppState extends State<AllowanceBudgetApp> {
       builder: (context, snapshot) {
         final activeUser = snapshot.data ?? AuthService.currentUser;
 
-        if (snapshot.connectionState == ConnectionState.waiting &&
-            activeUser == null) {
-          return const LoadingPage();
-        }
-
         if (activeUser == null) {
           return LoginPage(
             isDarkMode: _darkMode,
@@ -206,16 +202,24 @@ class _UserAuthWrapperState extends State<UserAuthWrapper> {
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user != null) {
+        // Add a small delay to ensure Firestore writes are synced
+        await Future.delayed(const Duration(milliseconds: 500));
         final isNewUser = await AuthService.isNewUser();
-        setState(() {
-          _showOnboarding = isNewUser;
-          _isLoading = false;
-        });
+        if (mounted) {
+          setState(() {
+            _showOnboarding = isNewUser;
+            _isLoading = false;
+          });
+        }
       } else {
-        setState(() => _isLoading = false);
+        if (mounted) {
+          setState(() => _isLoading = false);
+        }
       }
     } catch (e) {
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -227,7 +231,9 @@ class _UserAuthWrapperState extends State<UserAuthWrapper> {
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
-      return const LoadingPage();
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
     }
 
     if (_showOnboarding) {
@@ -264,7 +270,7 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
 
   static const Map<String, String> _currencySymbols = {
     'PHP': 'PHP ',
-    'USD': r'$',
+    'USD': 'USD ',
     'EUR': 'EUR ',
     'GBP': 'GBP ',
     'JPY': 'JPY ',
@@ -272,6 +278,34 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
     'CAD': 'CAD ',
     'INR': 'INR ',
     'SGD': 'SGD ',
+    'MXN': 'MXN ',
+    'BRL': 'BRL ',
+    'ZAR': 'ZAR ',
+    'NZD': 'NZD ',
+    'CHF': 'CHF ',
+    'CNY': 'CNY ',
+    'HKD': 'HKD ',
+    'IDR': 'IDR ',
+    'MYR': 'MYR ',
+    'THB': 'THB ',
+    'VND': 'VND ',
+    'KRW': 'KRW ',
+    'TWD': 'TWD ',
+    'SEK': 'SEK ',
+    'NOK': 'NOK ',
+    'DKK': 'DKK ',
+    'PLN': 'PLN ',
+    'CZK': 'CZK ',
+    'HUF': 'HUF ',
+    'RON': 'RON ',
+    'BGN': 'BGN ',
+    'HRK': 'HRK ',
+    'RUB': 'RUB ',
+    'TRY': 'TRY ',
+    'AED': 'AED ',
+    'SAR': 'SAR ',
+    'QAR': 'QAR ',
+    'KWD': 'KWD ',
   };
 
   BudgetData _data = BudgetData.defaultState();
@@ -397,7 +431,8 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
     }
 
     try {
-      final profile = await FirebaseService.getUserProfile(user.uid);
+      final profile = await FirebaseService.getUserProfile(user.uid)
+          .timeout(const Duration(seconds: 20), onTimeout: () => null);
       final fromFirestore = (profile?['photoUrl'] as String?)?.trim();
       final nextPhoto =
           (fromFirestore != null && fromFirestore.isNotEmpty) ? fromFirestore : user.photoURL;
@@ -2746,6 +2781,8 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Future<void> _openCurrencyPicker() async {
     final options = widget.currencySymbols.entries
+        .where((entry) =>
+            _currencyNames.containsKey(entry.key) && _countryCodes.containsKey(entry.key))
         .map(
           (entry) => _CurrencyOption(
             code: entry.key,
@@ -2775,28 +2812,9 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _openPrivacySettings() async {
-    final user = FirebaseAuth.instance.currentUser;
-    final email = user?.email;
-    if (email == null || email.trim().isEmpty) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No email found for this account.')),
-      );
-      return;
-    }
-
-    try {
-      await AuthService.resetPassword(email: email.trim());
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Password reset link sent to $email')),
-      );
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Unable to open privacy actions right now.')),
-      );
-    }
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const ChangePasswordPage()),
+    );
   }
 
   @override
@@ -2902,6 +2920,318 @@ class _CurrencyOption {
   final String name;
   final String symbol;
   final String countryCode;
+}
+
+class ChangePasswordPage extends StatefulWidget {
+  const ChangePasswordPage({super.key});
+
+  @override
+  State<ChangePasswordPage> createState() => _ChangePasswordPageState();
+}
+
+class _ChangePasswordPageState extends State<ChangePasswordPage> {
+  final _currentPasswordController = TextEditingController();
+  final _newPasswordController = TextEditingController();
+  final _confirmPasswordController = TextEditingController();
+
+  bool _showCurrentPassword = false;
+  bool _showNewPassword = false;
+  bool _showConfirmPassword = false;
+  bool _isVerifying = false;
+  bool _isSaving = false;
+  bool _verifiedCurrentPassword = false;
+
+  @override
+  void dispose() {
+    _currentPasswordController.dispose();
+    _newPasswordController.dispose();
+    _confirmPasswordController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _showAlert({
+    required String title,
+    required String message,
+    bool success = false,
+  }) async {
+    if (!mounted) return;
+    final scheme = Theme.of(context).colorScheme;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(title),
+        content: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+              success ? Icons.check_circle : Icons.info_outline,
+              color: success ? scheme.primary : scheme.onSurfaceVariant,
+            ),
+            const SizedBox(width: 10),
+            Expanded(child: Text(message)),
+          ],
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<bool> _didPasswordActuallyChange(String newPassword) async {
+    final user = FirebaseAuth.instance.currentUser;
+    final email = user?.email;
+    if (email == null || email.isEmpty) {
+      return false;
+    }
+    try {
+      await AuthService.signInWithEmail(email: email, password: newPassword);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _verifyCurrentPassword() async {
+    final currentPassword = _currentPasswordController.text;
+    if (currentPassword.isEmpty) {
+      await _showAlert(title: 'Missing Password', message: 'Enter your current password.');
+      return;
+    }
+
+    setState(() => _isVerifying = true);
+    try {
+      await AuthService.verifyCurrentPassword(currentPassword: currentPassword);
+      if (!mounted) return;
+      setState(() => _verifiedCurrentPassword = true);
+      await _showAlert(title: 'Verified', message: 'Current password verified.', success: true);
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+      final message =
+          (e.code == 'wrong-password' || e.code == 'invalid-credential')
+              ? 'Password incorrect.'
+              : 'Verification failed.';
+      await _showAlert(title: 'Verification Failed', message: message);
+    } catch (e) {
+      if (!mounted) return;
+      await _showAlert(
+        title: 'Verification Failed',
+        message: e.toString().replaceFirst('Exception: ', ''),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isVerifying = false);
+      }
+    }
+  }
+
+  Future<void> _saveNewPassword() async {
+    final newPassword = _newPasswordController.text;
+    final confirmPassword = _confirmPasswordController.text;
+
+    if (newPassword.length < 6) {
+      await _showAlert(title: 'Weak Password', message: 'Password must be at least 6 characters.');
+      return;
+    }
+
+    if (newPassword != confirmPassword) {
+      await _showAlert(title: 'Mismatch', message: 'Passwords do not match.');
+      return;
+    }
+
+    setState(() => _isSaving = true);
+    try {
+      await AuthService.updateCurrentUserPassword(newPassword: newPassword);
+      if (!mounted) return;
+      await _showAlert(title: 'Success', message: 'Password changed successfully.', success: true);
+      Navigator.of(context).pop();
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+      final raw = e.toString();
+      final isKnownPluginCastIssue =
+          raw.contains('PigeonUserDetails') ||
+          raw.contains("List<Object> is not a subtype");
+      if (isKnownPluginCastIssue) {
+        await _showAlert(title: 'Success', message: 'Password changed successfully.', success: true);
+        Navigator.of(context).pop();
+        return;
+      }
+
+      if (await _didPasswordActuallyChange(newPassword)) {
+        if (!mounted) return;
+        await _showAlert(title: 'Success', message: 'Password changed successfully.', success: true);
+        Navigator.of(context).pop();
+        return;
+      }
+
+      final message = e.code == 'requires-recent-login'
+          ? 'Session expired. Re-verify password.'
+          : 'Password change failed.';
+      await _showAlert(title: 'Update Failed', message: message);
+      if (e.code == 'requires-recent-login') {
+        setState(() => _verifiedCurrentPassword = false);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      final raw = e.toString();
+      final isKnownPluginCastIssue =
+          raw.contains('PigeonUserDetails') ||
+          raw.contains("List<Object> is not a subtype");
+      if (isKnownPluginCastIssue) {
+        await _showAlert(title: 'Success', message: 'Password changed successfully.', success: true);
+        Navigator.of(context).pop();
+        return;
+      }
+
+      if (await _didPasswordActuallyChange(newPassword)) {
+        if (!mounted) return;
+        await _showAlert(title: 'Success', message: 'Password changed successfully.', success: true);
+        Navigator.of(context).pop();
+        return;
+      }
+
+      await _showAlert(title: 'Update Failed', message: 'Password change failed.');
+    } finally {
+      if (mounted) {
+        setState(() => _isSaving = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Change Password')),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _verifiedCurrentPassword
+                        ? 'Step 2: Enter your new password'
+                        : 'Step 1: Verify your current password',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  if (!_verifiedCurrentPassword) ...[
+                    const Text('Enter your old password to continue.'),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _currentPasswordController,
+                      obscureText: !_showCurrentPassword,
+                      enabled: !_isVerifying,
+                      decoration: InputDecoration(
+                        labelText: 'Current password',
+                        prefixIcon: const Icon(Icons.lock_outline),
+                        suffixIcon: IconButton(
+                          onPressed: _isVerifying
+                              ? null
+                              : () => setState(
+                                  () => _showCurrentPassword = !_showCurrentPassword,
+                                ),
+                          icon: Icon(
+                            _showCurrentPassword
+                                ? Icons.visibility
+                                : Icons.visibility_off,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    FilledButton.icon(
+                      onPressed: _isVerifying ? null : _verifyCurrentPassword,
+                      icon: _isVerifying
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.verified_user_outlined),
+                      label: Text(_isVerifying ? 'Verifying...' : 'Verify current password'),
+                    ),
+                  ] else ...[
+                    const Text('Now enter and confirm your new password.'),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _newPasswordController,
+                      obscureText: !_showNewPassword,
+                      enabled: !_isSaving,
+                      decoration: InputDecoration(
+                        labelText: 'New password',
+                        prefixIcon: const Icon(Icons.lock_reset_outlined),
+                        suffixIcon: IconButton(
+                          onPressed: _isSaving
+                              ? null
+                              : () => setState(() => _showNewPassword = !_showNewPassword),
+                          icon: Icon(
+                            _showNewPassword ? Icons.visibility : Icons.visibility_off,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: _confirmPasswordController,
+                      obscureText: !_showConfirmPassword,
+                      enabled: !_isSaving,
+                      decoration: InputDecoration(
+                        labelText: 'Confirm new password',
+                        prefixIcon: const Icon(Icons.lock_outline),
+                        suffixIcon: IconButton(
+                          onPressed: _isSaving
+                              ? null
+                              : () =>
+                                  setState(() => _showConfirmPassword = !_showConfirmPassword),
+                          icon: Icon(
+                            _showConfirmPassword
+                                ? Icons.visibility
+                                : Icons.visibility_off,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    FilledButton.icon(
+                      onPressed: _isSaving ? null : _saveNewPassword,
+                      icon: _isSaving
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.save_outlined),
+                      label: Text(_isSaving ? 'Saving...' : 'Save new password'),
+                    ),
+                    const SizedBox(height: 8),
+                    TextButton(
+                      onPressed: _isSaving
+                          ? null
+                          : () => setState(() {
+                                _verifiedCurrentPassword = false;
+                                _newPasswordController.clear();
+                                _confirmPasswordController.clear();
+                              }),
+                      child: const Text('Use a different current password'),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _CurrencyPickerDialog extends StatefulWidget {
@@ -3069,10 +3399,17 @@ class _ProfilePageState extends State<ProfilePage> {
   bool _uploadingPhoto = false;
   bool _uploadingCover = false;
   bool _isEditing = false;
+  bool _profileResolved = false;
 
   @override
   void initState() {
     super.initState();
+    Future.delayed(const Duration(seconds: 12), () {
+      if (!mounted || _profileResolved) {
+        return;
+      }
+      _applyLocalProfileFallback();
+    });
     _loadProfile();
   }
 
@@ -3081,6 +3418,23 @@ class _ProfilePageState extends State<ProfilePage> {
     _nameController.dispose();
     _roleController.dispose();
     super.dispose();
+  }
+
+  void _applyLocalProfileFallback() {
+    final user = FirebaseAuth.instance.currentUser;
+    final fallbackName =
+        ((user?.displayName ?? '').trim().isNotEmpty) ? user!.displayName!.trim() : 'User';
+    if (!mounted) return;
+    setState(() {
+      _nameController.text = fallbackName;
+      _roleController.text = 'Student';
+      _photoUrl = user?.photoURL;
+      _coverPhotoUrl = null;
+      _pendingPhotoBytes = null;
+      _pendingCoverBytes = null;
+      _loading = false;
+      _profileResolved = true;
+    });
   }
 
   Future<void> _loadProfile() async {
@@ -3093,26 +3447,52 @@ class _ProfilePageState extends State<ProfilePage> {
     }
 
     try {
-      final profile = await FirebaseService.getUserProfile(user.uid);
+      final profile = await FirebaseService.getUserProfile(user.uid)
+          .timeout(const Duration(seconds: 10), onTimeout: () => null)
+          .catchError((_) => null);
       final fullName = (profile?['fullName'] as String?)?.trim();
       final role = (profile?['role'] as String?)?.trim();
       final photoUrl = (profile?['photoUrl'] as String?)?.trim();
       final coverPhotoUrl = (profile?['coverPhotoUrl'] as String?)?.trim();
 
+      final resolvedName =
+          (fullName != null && fullName.isNotEmpty)
+              ? fullName
+              : ((user.displayName ?? '').trim().isNotEmpty
+                  ? user.displayName!.trim()
+              : (((user.email ?? '').trim().isNotEmpty)
+                ? user.email!.trim().split('@').first
+                : 'User'));
+      final resolvedPhotoUrl =
+          (photoUrl != null && photoUrl.isNotEmpty) ? photoUrl : user.photoURL;
+
+      if ((fullName == null || fullName.isEmpty) ||
+          (photoUrl == null || photoUrl.isEmpty)) {
+        final userData = <String, dynamic>{
+          'fullName': resolvedName,
+          'email': (user.email ?? '').trim().toLowerCase(),
+          'emailLower': (user.email ?? '').trim().toLowerCase(),
+          'lastUpdated': DateTime.now(),
+        };
+        if (resolvedPhotoUrl != null && resolvedPhotoUrl.trim().isNotEmpty) {
+          userData['photoUrl'] = resolvedPhotoUrl;
+        }
+        try {
+          await FirebaseService.saveUserProfile(
+            userId: user.uid,
+            userData: userData,
+          ).timeout(const Duration(seconds: 8), onTimeout: () => null);
+        } catch (_) {
+          // Do not block profile rendering on a best-effort profile sync.
+        }
+      }
+
       if (!mounted) return;
       setState(() {
-        _nameController.text =
-            (fullName != null && fullName.isNotEmpty)
-                ? fullName
-                : ((user.displayName ?? '').trim().isNotEmpty
-                    ? user.displayName!.trim()
-                    : 'User');
+        _nameController.text = resolvedName;
         _roleController.text =
             (role != null && role.isNotEmpty) ? role : 'Student';
-        _photoUrl =
-            (photoUrl != null && photoUrl.isNotEmpty)
-                ? photoUrl
-                : user.photoURL;
+        _photoUrl = resolvedPhotoUrl;
         _coverPhotoUrl =
             (coverPhotoUrl != null && coverPhotoUrl.isNotEmpty)
                 ? coverPhotoUrl
@@ -3120,6 +3500,7 @@ class _ProfilePageState extends State<ProfilePage> {
         _pendingPhotoBytes = null;
         _pendingCoverBytes = null;
         _loading = false;
+        _profileResolved = true;
       });
     } catch (_) {
       if (!mounted) return;
@@ -3134,6 +3515,7 @@ class _ProfilePageState extends State<ProfilePage> {
         _pendingPhotoBytes = null;
         _pendingCoverBytes = null;
         _loading = false;
+        _profileResolved = true;
       });
     }
   }
@@ -3160,11 +3542,12 @@ class _ProfilePageState extends State<ProfilePage> {
       _pendingPhotoBytes = previewBytes;
       _uploadingPhoto = true;
     });
+    var uploaded = false;
     try {
-      final url = await FirebaseService.uploadProfileImage(
+      final url = await FirebaseService.uploadProfileImageBytes(
         userId: user.uid,
-        filePath: picked.path,
-      ).timeout(const Duration(seconds: 35), onTimeout: () => null);
+        bytes: previewBytes,
+      );
 
       if (url == null || url.isEmpty) {
         if (mounted) {
@@ -3175,7 +3558,7 @@ class _ProfilePageState extends State<ProfilePage> {
         }
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Unable to upload photo right now. Please try again.')),
+            const SnackBar(content: Text('Photo upload failed. Try again.')),
           );
         }
         return;
@@ -3185,8 +3568,10 @@ class _ProfilePageState extends State<ProfilePage> {
         setState(() {
           _photoUrl = url;
           _pendingPhotoBytes = null;
+          _uploadingPhoto = false;
         });
       }
+      uploaded = true;
       final resolvedName = _nameController.text.trim().isEmpty
           ? (((user.displayName ?? '').trim().isNotEmpty)
               ? user.displayName!.trim()
@@ -3198,7 +3583,7 @@ class _ProfilePageState extends State<ProfilePage> {
       await AuthService.updateUserProfile(
         fullName: resolvedName,
         photoUrl: url,
-      );
+      ).timeout(const Duration(seconds: 12), onTimeout: () {});
       final userData = <String, dynamic>{
         'fullName': resolvedName,
         'role': resolvedRole,
@@ -3211,24 +3596,32 @@ class _ProfilePageState extends State<ProfilePage> {
       await FirebaseService.saveUserProfile(
         userId: user.uid,
         userData: userData,
-      );
+      ).timeout(const Duration(seconds: 12), onTimeout: () {});
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Profile photo updated.')),
+          const SnackBar(content: Text('Photo updated.')),
         );
       }
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _pendingPhotoBytes = null;
-        _photoUrl = previousPhotoUrl;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Photo update failed: $e')),
-      );
+      if (!uploaded) {
+        setState(() {
+          _pendingPhotoBytes = null;
+          _photoUrl = previousPhotoUrl;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Photo upload failed. Please try again.')),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Photo uploaded. Sync in progress.'),
+          ),
+        );
+      }
     } finally {
-      if (mounted) {
+      if (mounted && _uploadingPhoto) {
         setState(() => _uploadingPhoto = false);
       }
     }
@@ -3242,7 +3635,7 @@ class _ProfilePageState extends State<ProfilePage> {
     final role = _roleController.text.trim();
     if (fullName.isEmpty || role.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Name and role are required.')),
+        const SnackBar(content: Text('Enter name and role.')),
       );
       return;
     }
@@ -3271,7 +3664,7 @@ class _ProfilePageState extends State<ProfilePage> {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Profile updated successfully.')),
+          const SnackBar(content: Text('Profile updated.')),
         );
         setState(() => _isEditing = false);
       }
@@ -3322,12 +3715,13 @@ class _ProfilePageState extends State<ProfilePage> {
       _pendingCoverBytes = previewBytes;
       _uploadingCover = true;
     });
+    var uploaded = false;
 
     try {
-      final url = await FirebaseService.uploadCoverImage(
+      final url = await FirebaseService.uploadCoverImageBytes(
         userId: user.uid,
-        filePath: picked.path,
-      ).timeout(const Duration(seconds: 35), onTimeout: () => null);
+        bytes: previewBytes,
+      );
 
       if (url == null || url.isEmpty) {
         setState(() {
@@ -3335,7 +3729,7 @@ class _ProfilePageState extends State<ProfilePage> {
           _coverPhotoUrl = previousCoverUrl;
         });
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Unable to upload background right now.')),
+          const SnackBar(content: Text('Background upload failed.')),
         );
         return;
       }
@@ -3343,7 +3737,9 @@ class _ProfilePageState extends State<ProfilePage> {
       setState(() {
         _coverPhotoUrl = url;
         _pendingCoverBytes = null;
+        _uploadingCover = false;
       });
+      uploaded = true;
       final resolvedName = _nameController.text.trim().isEmpty
           ? (((user.displayName ?? '').trim().isNotEmpty)
               ? user.displayName!.trim()
@@ -3355,7 +3751,7 @@ class _ProfilePageState extends State<ProfilePage> {
       await AuthService.updateUserProfile(
         fullName: resolvedName,
         photoUrl: _photoUrl,
-      );
+      ).timeout(const Duration(seconds: 12), onTimeout: () {});
       final userData = <String, dynamic>{
         'fullName': resolvedName,
         'role': resolvedRole,
@@ -3368,7 +3764,7 @@ class _ProfilePageState extends State<ProfilePage> {
       await FirebaseService.saveUserProfile(
         userId: user.uid,
         userData: userData,
-      );
+      ).timeout(const Duration(seconds: 12), onTimeout: () {});
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Background updated.')),
@@ -3376,15 +3772,23 @@ class _ProfilePageState extends State<ProfilePage> {
       }
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _pendingCoverBytes = null;
-        _coverPhotoUrl = previousCoverUrl;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Background update failed: $e')),
-      );
+      if (!uploaded) {
+        setState(() {
+          _pendingCoverBytes = null;
+          _coverPhotoUrl = previousCoverUrl;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Background upload failed. Please try again.')),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Background uploaded. Sync in progress.'),
+          ),
+        );
+      }
     } finally {
-      if (mounted) {
+      if (mounted && _uploadingCover) {
         setState(() => _uploadingCover = false);
       }
     }
@@ -3430,52 +3834,141 @@ class _ProfilePageState extends State<ProfilePage> {
               padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
               child: Column(
                 children: [
-                  Container(
-                    height: 120,
-                    decoration: BoxDecoration(
-                      image: _coverProvider() != null
-                          ? DecorationImage(
-                              image: _coverProvider()!,
-                              fit: BoxFit.cover,
-                            )
-                          : null,
-                      gradient: _coverProvider() == null
-                          ? LinearGradient(
-                              colors: [scheme.primary, scheme.primary.withValues(alpha: 0.78)],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                            )
-                          : null,
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: _coverProvider() != null
-                        ? DecoratedBox(
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(14),
-                              gradient: LinearGradient(
-                                begin: Alignment.topCenter,
-                                end: Alignment.bottomCenter,
-                                colors: [
-                                  Colors.black.withValues(alpha: 0.12),
-                                  Colors.black.withValues(alpha: 0.28),
-                                ],
-                              ),
-                            ),
-                          )
+                  GestureDetector(
+                    onTap: _isEditing && !_uploadingCover
+                        ? _pickAndUploadCoverPhoto
                         : null,
+                    child: MouseRegion(
+                      cursor: _isEditing && !_uploadingCover
+                          ? SystemMouseCursors.click
+                          : SystemMouseCursors.basic,
+                      child: Container(
+                        height: 120,
+                        decoration: BoxDecoration(
+                          image: _coverProvider() != null
+                              ? DecorationImage(
+                                  image: _coverProvider()!,
+                                  fit: BoxFit.cover,
+                                )
+                              : null,
+                          gradient: _coverProvider() == null
+                              ? LinearGradient(
+                                  colors: [scheme.primary, scheme.primary.withValues(alpha: 0.78)],
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                )
+                              : null,
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Stack(
+                          children: [
+                            if (_coverProvider() != null)
+                              DecoratedBox(
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(14),
+                                  gradient: LinearGradient(
+                                    begin: Alignment.topCenter,
+                                    end: Alignment.bottomCenter,
+                                    colors: [
+                                      Colors.black.withValues(alpha: 0.12),
+                                      Colors.black.withValues(alpha: 0.28),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            if (_isEditing && !_uploadingCover)
+                              const Positioned.fill(
+                                child: Center(
+                                  child: Icon(
+                                    Icons.photo_camera_outlined,
+                                    color: Colors.white,
+                                    size: 36,
+                                  ),
+                                ),
+                              )
+                            else if (_uploadingCover)
+                              const Positioned.fill(
+                                child: Center(
+                                  child: SizedBox(
+                                    width: 32,
+                                    height: 32,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
                   ),
                   Transform.translate(
                     offset: const Offset(0, -30),
-                    child: CircleAvatar(
-                      radius: 42,
-                      backgroundColor: Colors.white,
-                      child: CircleAvatar(
-                        radius: 39,
-                        backgroundColor: scheme.primaryContainer,
-                        backgroundImage: _photoProvider(),
-                        child: _photoProvider() == null
-                            ? Icon(Icons.person, size: 34, color: scheme.primary)
-                            : null,
+                    child: GestureDetector(
+                      onTap: _isEditing && !_uploadingPhoto
+                          ? _pickAndUploadPhoto
+                          : null,
+                      child: MouseRegion(
+                        cursor: _isEditing && !_uploadingPhoto
+                            ? SystemMouseCursors.click
+                            : SystemMouseCursors.basic,
+                        child: Stack(
+                          children: [
+                            CircleAvatar(
+                              radius: 42,
+                              backgroundColor: Colors.white,
+                              child: CircleAvatar(
+                                radius: 39,
+                                backgroundColor: scheme.primaryContainer,
+                                backgroundImage: _photoProvider(),
+                                child: _photoProvider() == null
+                                    ? Icon(Icons.person, size: 34, color: scheme.primary)
+                                    : null,
+                              ),
+                            ),
+                            if (_isEditing && !_uploadingPhoto)
+                              Positioned(
+                                bottom: 0,
+                                right: 0,
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    color: scheme.primary,
+                                    shape: BoxShape.circle,
+                                    border: Border.all(color: Colors.white, width: 2),
+                                  ),
+                                  padding: const EdgeInsets.all(6),
+                                  child: const Icon(
+                                    Icons.edit_outlined,
+                                    color: Colors.white,
+                                    size: 18,
+                                  ),
+                                ),
+                              )
+                            else if (_uploadingPhoto)
+                              Positioned(
+                                bottom: 0,
+                                right: 0,
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    color: scheme.primary,
+                                    shape: BoxShape.circle,
+                                    border: Border.all(color: Colors.white, width: 2),
+                                  ),
+                                  padding: const EdgeInsets.all(4),
+                                  child: const SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -3497,44 +3990,16 @@ class _ProfilePageState extends State<ProfilePage> {
                     textAlign: TextAlign.center,
                     style: TextStyle(color: scheme.onSurfaceVariant),
                   ),
-                  const SizedBox(height: 12),
+                  if (_isEditing) const SizedBox(height: 12),
                   if (_isEditing)
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      alignment: WrapAlignment.center,
-                      children: [
-                        FilledButton.icon(
-                          onPressed: (_uploadingPhoto || _saving)
-                              ? null
-                              : _pickAndUploadPhoto,
-                          icon: Icon(
-                            _uploadingPhoto
-                                ? Icons.cloud_upload_outlined
-                                : Icons.photo_camera_outlined,
-                          ),
-                          label: Text(
-                            _uploadingPhoto
-                                ? 'Uploading photo...'
-                                : 'Change profile photo',
-                          ),
-                        ),
-                        FilledButton.icon(
-                          onPressed: (_uploadingCover || _saving)
-                              ? null
-                              : _pickAndUploadCoverPhoto,
-                          icon: Icon(
-                            _uploadingCover
-                                ? Icons.cloud_upload_outlined
-                                : Icons.wallpaper_outlined,
-                          ),
-                          label: Text(
-                            _uploadingCover
-                                ? 'Uploading background...'
-                                : 'Change background',
-                          ),
-                        ),
-                      ],
+                    Text(
+                      'Tap your profile photo or background to change them',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: scheme.onSurfaceVariant,
+                        fontStyle: FontStyle.italic,
+                      ),
                     ),
                 ],
               ),

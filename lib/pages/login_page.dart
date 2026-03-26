@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../auth_service.dart';
+import 'forgot_password_page.dart';
 import 'signup_page.dart';
 
 class LoginPage extends StatefulWidget {
@@ -96,6 +97,13 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 
+  Future<void> _openForgotPassword() async {
+    if (_isLoading) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const ForgotPasswordPage()),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -111,43 +119,44 @@ class _LoginPageState extends State<LoginPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Row(
-                    children: [
-                      const Spacer(),
-                      IconButton(
-                        tooltip: widget.isDarkMode ? 'Light mode' : 'Dark mode',
-                        onPressed: () => widget.onToggleDarkMode(!widget.isDarkMode),
-                        icon: Icon(
-                          widget.isDarkMode
-                              ? Icons.light_mode_outlined
-                              : Icons.dark_mode_outlined,
+                    Row(
+                      children: [
+                        const Spacer(),
+                        IconButton(
+                          tooltip: widget.isDarkMode ? 'Light mode' : 'Dark mode',
+                          onPressed: () => widget.onToggleDarkMode(!widget.isDarkMode),
+                          icon: Icon(
+                            widget.isDarkMode
+                                ? Icons.light_mode_outlined
+                                : Icons.dark_mode_outlined,
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
-                  Center(
-                    child: Container(
-                      width: 74,
-                      height: 74,
-                      decoration: BoxDecoration(
-                        color: scheme.primaryContainer,
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Icon(
-                        Icons.account_balance_wallet,
-                        size: 40,
-                        color: scheme.primary,
+                      ],
+                    ),
+                    Center(
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 300),
+                        width: 74,
+                        height: 74,
+                        decoration: BoxDecoration(
+                          color: scheme.primaryContainer,
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Icon(
+                          Icons.account_balance_wallet,
+                          size: 40,
+                          color: scheme.primary,
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'Welcome Back',
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                  ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Welcome Back',
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                    ),
                   const SizedBox(height: 6),
                   Text(
                     'Sign in to continue to your allowance dashboard.',
@@ -201,6 +210,14 @@ class _LoginPageState extends State<LoginPage> {
                                     ? null
                                     : () => setState(() => _showPassword = !_showPassword),
                               ),
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: TextButton(
+                              onPressed: _isLoading ? null : _openForgotPassword,
+                              child: const Text('Forgot password?'),
                             ),
                           ),
                           const SizedBox(height: 14),

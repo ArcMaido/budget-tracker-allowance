@@ -1,253 +1,123 @@
 import 'package:flutter/material.dart';
 
 class OnboardingPage extends StatefulWidget {
-  final VoidCallback onComplete;
-
   const OnboardingPage({
     super.key,
     required this.onComplete,
   });
+
+  final VoidCallback onComplete;
 
   @override
   State<OnboardingPage> createState() => _OnboardingPageState();
 }
 
 class _OnboardingPageState extends State<OnboardingPage> {
-  late PageController _pageController;
-  int _currentPage = 0;
-
-  final List<OnboardingScreen> screens = [
-    OnboardingScreen(
-      icon: Icons.wallet,
-      title: 'Welcome to Coinzy',
-      description:
-          'Coinzy helps you plan your allowance, track spending, and build better money habits day by day.',
-      color: const Color(0xFF1A7A59),
-    ),
-    OnboardingScreen(
-      icon: Icons.lightbulb_outline,
-      title: 'What This App Helps You Do',
-      description:
-          'See where your money goes, avoid overspending, and stay aware of your remaining balance before the month ends.',
-      color: const Color(0xFF2F855A),
-    ),
-    OnboardingScreen(
-      icon: Icons.category,
-      title: 'Create Categories',
-      description:
-          'Create categories like Food, Transportation, School, and Savings. Set a budget for each one.',
-      color: const Color(0xFF4F6358),
-    ),
-    OnboardingScreen(
-      icon: Icons.shopping_cart,
-      title: 'Track Spending',
-      description:
-          'Add transactions whenever you spend money. Select the category and amount to keep track of your expenses.',
-      color: const Color(0xFF2D6A4F),
-    ),
-    OnboardingScreen(
-      icon: Icons.pie_chart,
-      title: 'View Statistics',
-      description:
-          'Check your Overview tab to see your total spending, remaining balance, and progress bar for each category.',
-      color: const Color(0xFF1B4332),
-    ),
-    OnboardingScreen(
-      icon: Icons.trending_up,
-      title: 'Stay in Budget',
-      description:
-          'Use progress bars and monthly totals to stay within budget and improve your spending decisions.',
-      color: const Color(0xFF0B6E3F),
-    ),
-  ];
-
-  @override
-  void initState() {
-    super.initState();
-    _pageController = PageController();
-  }
-
-  @override
-  void dispose() {
-    _pageController.dispose();
-    super.dispose();
-  }
+  bool _finishing = false;
 
   Future<void> _completeOnboarding() async {
+    if (_finishing) {
+      return;
+    }
+
+    setState(() => _finishing = true);
+
     try {
       widget.onComplete();
     } catch (e) {
-      print('Error completing onboarding: $e');
+      if (!mounted) {
+        return;
+      }
+      setState(() => _finishing = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to finish onboarding right now.')),
+      );
+      debugPrint('Error completing onboarding: $e');
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
     return Scaffold(
-      body: Stack(
-        children: [
-          PageView.builder(
-            controller: _pageController,
-            onPageChanged: (index) {
-              setState(() => _currentPage = index);
-            },
-            itemCount: screens.length,
-            itemBuilder: (context, index) {
-              return OnboardingScreenWidget(screen: screens[index]);
-            },
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              scheme.primary.withValues(alpha: 0.12),
+              scheme.surface,
+            ],
           ),
-          // Dots indicator
-          Positioned(
-            bottom: 100,
-            left: 0,
-            right: 0,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: List.generate(
-                screens.length,
-                (index) => AnimatedContainer(
-                  duration: const Duration(milliseconds: 300),
-                  margin: const EdgeInsets.symmetric(horizontal: 4),
-                  height: 8,
-                  width: _currentPage == index ? 24 : 8,
-                  decoration: BoxDecoration(
-                    color: _currentPage == index
-                        ? screens[_currentPage].color
-                        : Colors.grey[300],
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                ),
-              ),
-            ),
-          ),
-          // Bottom buttons
-          Positioned(
-            bottom: 20,
-            left: 20,
-            right: 20,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                // Skip button (only show if not on last page)
-                _currentPage < screens.length - 1
-                    ? TextButton(
-                        onPressed: _completeOnboarding,
-                        child: const Text('Skip'),
-                      )
-                    : const SizedBox(width: 60),
-                // Next/Finish button
-                ElevatedButton(
-                  onPressed: () {
-                    if (_currentPage == screens.length - 1) {
-                      _completeOnboarding();
-                    } else {
-                      _pageController.nextPage(
-                        duration: const Duration(milliseconds: 300),
-                        curve: Curves.easeInOut,
-                      );
-                    }
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: screens[_currentPage].color,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 32,
-                      vertical: 12,
-                    ),
-                  ),
-                  child: Text(
-                    _currentPage == screens.length - 1 ? 'Get Started' : 'Next',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class OnboardingScreen {
-  final IconData icon;
-  final String title;
-  final String description;
-  final Color color;
-
-  OnboardingScreen({
-    required this.icon,
-    required this.title,
-    required this.description,
-    required this.color,
-  });
-}
-
-class OnboardingScreenWidget extends StatelessWidget {
-  final OnboardingScreen screen;
-
-  const OnboardingScreenWidget({
-    super.key,
-    required this.screen,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            screen.color.withOpacity(0.1),
-            screen.color.withOpacity(0.05),
-          ],
         ),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            // Icon
-            Container(
-              width: 120,
-              height: 120,
-              decoration: BoxDecoration(
-                color: screen.color.withOpacity(0.2),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                screen.icon,
-                size: 60,
-                color: screen.color,
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(18),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 500),
+              child: Card(
+                elevation: 0,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 24, 20, 18),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Icon(
+                        Icons.wallet_giftcard_outlined,
+                        size: 56,
+                        color: scheme.primary,
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Welcome to Coinzy!',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                              fontWeight: FontWeight.w800,
+                            ),
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        'Coinzy helps you manage allowance, track spending, and stay on budget using clear summaries and category-based planning.',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                              height: 1.45,
+                              color: scheme.onSurfaceVariant,
+                            ),
+                      ),
+                      const SizedBox(height: 16),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: scheme.primaryContainer.withValues(alpha: 0.55),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          'Start by setting your monthly allowance, then add expenses daily to see your remaining balance in real time.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: scheme.onPrimaryContainer),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      FilledButton.icon(
+                        onPressed: _finishing ? null : _completeOnboarding,
+                        icon: _finishing
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.check_circle_outline),
+                        label: Text(_finishing ? 'Opening app...' : 'Continue'),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ),
-            const SizedBox(height: 40),
-            // Title
-            Text(
-              screen.title,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 28,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 16),
-            // Description
-            Text(
-              screen.description,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 16,
-                color: Colors.grey[700],
-                height: 1.6,
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../auth_service.dart';
+import '../firebase_service.dart';
 
 class SignupPage extends StatefulWidget {
   const SignupPage({
@@ -152,12 +153,41 @@ class _SignupPageState extends State<SignupPage> {
     });
 
     try {
-      await AuthService.signUpWithEmail(
-        email: _emailController.text.trim(),
+      final normalizedName = _nameController.text.trim();
+      final normalizedEmail = _emailController.text.trim();
+      final normalizedPhoto = (_googlePhotoUrl ?? '').trim();
+      final credential = await AuthService.signUpWithEmail(
+        email: normalizedEmail,
         password: _passwordController.text,
-        fullName: _nameController.text.trim(),
-        photoUrl: _googlePhotoUrl,
+        fullName: normalizedName,
+        photoUrl: normalizedPhoto.isNotEmpty ? normalizedPhoto : null,
       );
+
+      final createdUser = credential?.user ?? AuthService.currentUser;
+      if (createdUser != null) {
+        final safeName = normalizedName.trim().isNotEmpty
+            ? normalizedName.trim()
+            : normalizedEmail.split('@').first;
+        if ((createdUser.displayName ?? '').trim().isEmpty && normalizedName.isNotEmpty) {
+          await createdUser.updateDisplayName(normalizedName);
+        }
+        if ((createdUser.photoURL ?? '').trim().isEmpty && normalizedPhoto.isNotEmpty) {
+          await createdUser.updatePhotoURL(normalizedPhoto);
+        }
+        await FirebaseService.saveUserProfile(
+          userId: createdUser.uid,
+          userData: <String, dynamic>{
+            'fullName': safeName,
+            'email': normalizedEmail,
+            'emailLower': normalizedEmail,
+            'photoUrl': (normalizedPhoto.isNotEmpty)
+                ? normalizedPhoto
+                : createdUser.photoURL,
+            'lastUpdated': DateTime.now(),
+          },
+        );
+      }
+
       await _showSignupNotice(
         title: 'Account Created',
         message: 'Your account was created successfully. Please sign in with your email and password.',
@@ -220,10 +250,12 @@ class _SignupPageState extends State<SignupPage> {
       }
       if (!mounted) return;
       final displayName = (prefill.displayName ?? '').trim();
+      final fallbackName = prefill.email.split('@').first.replaceAll('.', ' ').trim();
       setState(() {
         _emailController.text = prefill.email;
-        if (displayName.isNotEmpty) {
-          _nameController.text = displayName;
+        final resolvedName = displayName.isNotEmpty ? displayName : fallbackName;
+        if (resolvedName.isNotEmpty) {
+          _nameController.text = resolvedName;
           _namePrefilledFromGoogle = true;
         }
         _googlePhotoUrl = (prefill.photoUrl ?? '').trim().isNotEmpty
