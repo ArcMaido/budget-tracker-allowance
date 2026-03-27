@@ -32,6 +32,37 @@ class _SignupPageState extends State<SignupPage> {
   bool _namePrefilledFromGoogle = false;
   String? _googlePhotoUrl;
 
+  String _fallbackNameFromEmail(String email) {
+    final rawLocal = email.trim().split('@').first.trim();
+    if (rawLocal.isEmpty) {
+      return '';
+    }
+
+    var unquoted = rawLocal;
+    while (unquoted.startsWith('"') || unquoted.startsWith("'")) {
+      unquoted = unquoted.substring(1).trimLeft();
+    }
+    while (unquoted.endsWith('"') || unquoted.endsWith("'")) {
+      unquoted = unquoted.substring(0, unquoted.length - 1).trimRight();
+    }
+
+    final cleaned = unquoted
+        .replaceAll(RegExp(r'[._-]+'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+
+    if (cleaned.isEmpty) {
+      return '';
+    }
+
+    return cleaned
+        .split(' ')
+        .where((part) => part.isNotEmpty)
+        .map((part) => part[0].toUpperCase() + part.substring(1).toLowerCase())
+        .join(' ')
+        .trim();
+  }
+
   Future<void> _showSignupNotice({
     required String title,
     required String message,
@@ -165,27 +196,20 @@ class _SignupPageState extends State<SignupPage> {
 
       final createdUser = credential?.user ?? AuthService.currentUser;
       if (createdUser != null) {
-        final safeName = normalizedName.trim().isNotEmpty
-            ? normalizedName.trim()
-            : normalizedEmail.split('@').first;
         if ((createdUser.displayName ?? '').trim().isEmpty && normalizedName.isNotEmpty) {
-          await createdUser.updateDisplayName(normalizedName);
+          try {
+            await createdUser.updateDisplayName(normalizedName);
+          } catch (e) {
+            print('Warning: Could not update auth display name: $e');
+          }
         }
         if ((createdUser.photoURL ?? '').trim().isEmpty && normalizedPhoto.isNotEmpty) {
-          await createdUser.updatePhotoURL(normalizedPhoto);
+          try {
+            await createdUser.updatePhotoURL(normalizedPhoto);
+          } catch (e) {
+            print('Warning: Could not update auth photo: $e');
+          }
         }
-        await FirebaseService.saveUserProfile(
-          userId: createdUser.uid,
-          userData: <String, dynamic>{
-            'fullName': safeName,
-            'email': normalizedEmail,
-            'emailLower': normalizedEmail,
-            'photoUrl': (normalizedPhoto.isNotEmpty)
-                ? normalizedPhoto
-                : createdUser.photoURL,
-            'lastUpdated': DateTime.now(),
-          },
-        );
       }
 
       await _showSignupNotice(
@@ -209,17 +233,18 @@ class _SignupPageState extends State<SignupPage> {
         await _returnToLogin();
       } else if (raw.contains('PigeonUserDetails') ||
           raw.contains("List<Object> is not a subtype")) {
+        // Auth succeeded but there was a bridge error. Account is usable.
         await _showSignupNotice(
-          title: 'Account Ready',
-          message: 'Account was created. Please sign in on the Login page.',
-          success: false,
+          title: 'Account Created',
+          message: 'Your account was created successfully. Please sign in with your email and password.',
+          success: true,
         );
         await _returnToLogin();
       } else if (hasPasswordSignIn) {
         await _showSignupNotice(
-          title: 'Account Ready',
-          message: 'Account is ready. Please sign in on the Login page.',
-          success: false,
+          title: 'Account Created',
+          message: 'Your account is ready. Please sign in on the Login page.',
+          success: true,
         );
         await _returnToLogin();
       } else {
@@ -250,7 +275,7 @@ class _SignupPageState extends State<SignupPage> {
       }
       if (!mounted) return;
       final displayName = (prefill.displayName ?? '').trim();
-      final fallbackName = prefill.email.split('@').first.replaceAll('.', ' ').trim();
+      final fallbackName = _fallbackNameFromEmail(prefill.email);
       setState(() {
         _emailController.text = prefill.email;
         final resolvedName = displayName.isNotEmpty ? displayName : fallbackName;
@@ -427,6 +452,12 @@ class _SignupPageState extends State<SignupPage> {
                                     setState(() => _agreedToTerms = value ?? false);
                                   },
                             title: const Text('I agree to Terms and Conditions'),
+                            subtitle: Text(
+                              'Your data is encrypted and securely stored. We never share your personal information.',
+                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: scheme.onSurfaceVariant,
+                                  ),
+                            ),
                             controlAffinity: ListTileControlAffinity.leading,
                           ),
                           const SizedBox(height: 10),

@@ -1,12 +1,11 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
-import 'dart:typed_data';
 
 import 'package:country_flags/country_flags.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -17,6 +16,7 @@ import 'firebase_service.dart';
 import 'firebase_options.dart';
 import 'pages/login_page.dart';
 import 'pages/onboarding_page.dart';
+import 'pages/profile_page.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -166,6 +166,7 @@ class _AllowanceBudgetAppState extends State<AllowanceBudgetApp> {
         }
 
         return UserAuthWrapper(
+          key: ValueKey<String>(activeUser.uid),
           isDarkMode: _darkMode,
           onToggleDarkMode: _setDarkMode,
         );
@@ -191,20 +192,41 @@ class UserAuthWrapper extends StatefulWidget {
 class _UserAuthWrapperState extends State<UserAuthWrapper> {
   bool _showOnboarding = false;
   bool _isLoading = true;
+  StreamSubscription<User?>? _authSub;
 
   @override
   void initState() {
     super.initState();
+    _authSub = FirebaseAuth.instance.authStateChanges().listen((_) {
+      if (mounted) {
+        setState(() => _isLoading = true);
+      }
+      _checkOnboardingStatus();
+    });
     _checkOnboardingStatus();
+  }
+
+  @override
+  void dispose() {
+    _authSub?.cancel();
+    super.dispose();
   }
 
   Future<void> _checkOnboardingStatus() async {
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user != null) {
-        // Add a small delay to ensure Firestore writes are synced
-        await Future.delayed(const Duration(milliseconds: 500));
-        final isNewUser = await AuthService.isNewUser();
+        // Retry a few times so fresh sign-in writes are reflected immediately.
+        var isNewUser = false;
+        for (var attempt = 0; attempt < 3; attempt++) {
+          if (attempt > 0) {
+            await Future.delayed(const Duration(milliseconds: 350));
+          }
+          isNewUser = await AuthService.isNewUser();
+          if (isNewUser) {
+            break;
+          }
+        }
         if (mounted) {
           setState(() {
             _showOnboarding = isNewUser;
@@ -336,6 +358,7 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
   bool _monthlyShowSpent = true;
   bool _monthlyShowSaved = true;
   bool _monthlyShowRate = true;
+  bool _isEditingAllowance = false;
   int _selectedNavIndex = 0;
   String _currencyCode = 'PHP';
   String? _profilePhotoUrl;
@@ -499,12 +522,19 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
   }
 
   Future<void> _save() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_scopedStorageKey(), _data.toJson());
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_scopedStorageKey(), _data.toJson());
+      debugPrint('[Save] SharedPreferences updated successfully');
+    } catch (e) {
+      debugPrint('[Save] SharedPreferences error: $e');
+      rethrow;
+    }
 
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user != null) {
+        debugPrint('[Save] Syncing to Firebase for user: ${user.uid}');
         for (final tx in _data.transactions) {
           await DataService.saveTransaction(
             category: tx.category,
@@ -520,9 +550,13 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
           );
         }
         await DataService.setMonthlyAllowance(_data.monthlyAllowance);
+        debugPrint('[Save] Firebase sync completed');
+      } else {
+        debugPrint('[Save] No user logged in, skipping Firebase sync');
       }
     } catch (e) {
-      debugPrint('Firebase sync error: $e');
+      debugPrint('[Save] Firebase sync error: $e');
+      // Don't rethrow - Firebase errors should not prevent local save
     }
   }
 
@@ -683,14 +717,33 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
       ..sort((a, b) => b.date.compareTo(a.date));
   }
 
-  Future<void> _saveAllowance() async {
+  Future<bool> _saveAllowance() async {
     final next = double.tryParse(_allowanceController.text.trim());
     if (next == null || next <= 0) {
       _showHint('Enter a valid monthly allowance greater than 0.');
-      return;
+      return false;
     }
-    setState(() => _data.monthlyAllowance = next);
-    await _save();
+    
+    try {
+      setState(() => _data.monthlyAllowance = next);
+      await _save();
+      
+      if (!mounted) {
+        return true;
+      }
+      
+      await _showSuccessAlert(
+        title: 'Monthly Allowance Set',
+        message: 'Your monthly allowance has been set successfully.',
+      );
+      return true;
+    } catch (e) {
+      debugPrint('Error saving allowance: $e');
+      if (mounted) {
+        _showHint('Error saving allowance: $e');
+      }
+      return false;
+    }
   }
 
   Future<void> _addExpense() async {
@@ -726,16 +779,37 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
       return;
     }
 
-    setState(() {
-      _data.categories[name] = budget;
-      _syncCategoryLineColors();
-      _categoryNameController.clear();
-      _categoryBudgetController.clear();
-      if (!_data.categories.containsKey(_expenseCategory)) {
-        _expenseCategory = name;
+    final existed = _data.categories.containsKey(name);
+
+    try {
+      setState(() {
+        _data.categories[name] = budget;
+        _syncCategoryLineColors();
+        _categoryNameController.clear();
+        _categoryBudgetController.clear();
+        if (!_data.categories.containsKey(_expenseCategory)) {
+          _expenseCategory = name;
+        }
+      });
+      
+      await _save();
+      
+      if (!mounted) {
+        return;
       }
-    });
-    await _save();
+      
+      await _showSuccessAlert(
+        title: existed ? 'Category Updated' : 'Category Added',
+        message: existed
+            ? 'Category updated successfully.'
+            : 'Category added successfully.',
+      );
+    } catch (e) {
+      debugPrint('Error upserting category: $e');
+      if (mounted) {
+        _showHint('Error saving category: $e');
+      }
+    }
   }
 
   Future<void> _removeCategory() async {
@@ -772,6 +846,50 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
 
   void _showHint(String text) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  }
+
+  Future<void> _showSuccessAlert({
+    required String title,
+    required String message,
+  }) async {
+    if (!mounted) {
+      debugPrint('[Success Alert] Widget not mounted, skipping dialog: $title');
+      return;
+    }
+
+    try {
+      final scheme = Theme.of(context).colorScheme;
+
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: true,
+        builder: (dialogContext) {
+          return AlertDialog(
+            title: Row(
+              children: [
+                const Icon(Icons.check_circle_outline, color: Colors.green),
+                const SizedBox(width: 8),
+                Expanded(child: Text(title)),
+              ],
+            ),
+            content: Text(message),
+            actions: [
+              FilledButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                style: FilledButton.styleFrom(
+                  backgroundColor: scheme.primary,
+                  foregroundColor: scheme.onPrimary,
+                ),
+                child: const Text('OK'),
+              ),
+            ],
+          );
+        },
+      );
+      debugPrint('[Success Alert] Dialog dismissed: $title');
+    } catch (e) {
+      debugPrint('[Success Alert] Error showing alert: $e');
+    }
   }
 
   Future<void> _openProfilePage() async {
@@ -1334,12 +1452,12 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
               decoration: BoxDecoration(
                 color: stats.remaining < 0 || stats.percentUsed >= 85
                     ? scheme.errorContainer
-                    : scheme.tertiaryContainer,
+                    : scheme.primaryContainer,
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(
                   color: stats.remaining < 0 || stats.percentUsed >= 85
                       ? scheme.error
-                      : scheme.tertiary,
+                      : scheme.primary,
                 ),
               ),
               child: Text(
@@ -1351,7 +1469,7 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
                 style: TextStyle(
                   color: stats.remaining < 0 || stats.percentUsed >= 85
                       ? scheme.onErrorContainer
-                      : scheme.onTertiaryContainer,
+                      : scheme.onPrimaryContainer,
                   fontSize: 12,
                 ),
               ),
@@ -1369,19 +1487,60 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
           children: [
             const Text('Allowance', style: TextStyle(fontWeight: FontWeight.w700)),
             const SizedBox(height: 4),
-            const Text('Set your monthly spending limit in PHP.'),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _allowanceController,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(
-                labelText: 'Monthly allowance',
-                hintText: 'e.g., 350',
-                border: OutlineInputBorder(),
-              ),
+            Text(
+              'Current monthly allowance: ${_money(_data.monthlyAllowance)}',
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: scheme.primary,
+                  ),
             ),
             const SizedBox(height: 10),
-            FilledButton.tonal(onPressed: _saveAllowance, child: const Text('Save')),
+            if (!_isEditingAllowance)
+              OutlinedButton.icon(
+                onPressed: () {
+                  setState(() {
+                    _allowanceController.text = _data.monthlyAllowance.toStringAsFixed(0);
+                    _isEditingAllowance = true;
+                  });
+                },
+                icon: const Icon(Icons.edit_outlined),
+                label: const Text('Set amount'),
+              )
+            else ...[
+              TextField(
+                controller: _allowanceController,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                  labelText: 'Monthly allowance',
+                  hintText: 'e.g., 350',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  FilledButton(
+                    onPressed: () async {
+                      final saved = await _saveAllowance();
+                      if (saved && mounted) {
+                        setState(() => _isEditingAllowance = false);
+                      }
+                    },
+                    style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+                    ),
+                    child: const Text('Save'),
+                  ),
+                  const SizedBox(width: 8),
+                  OutlinedButton(
+                    onPressed: () {
+                      setState(() => _isEditingAllowance = false);
+                    },
+                    child: const Text('Cancel'),
+                  ),
+                ],
+              ),
+            ],
             const SizedBox(height: 8),
             const Text('Tip: Values are saved locally in your device storage.'),
           ],
@@ -1419,24 +1578,24 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
         if (constraints.maxWidth < 980) {
           return Column(
             children: [
+              allowancePanel,
+              const SizedBox(height: 10),
               spentVsAllowancePanel,
               const SizedBox(height: 10),
               panelLeft,
-              const SizedBox(height: 10),
-              allowancePanel,
             ],
           );
         }
         return Column(
           children: [
-            spentVsAllowancePanel,
+            allowancePanel,
             const SizedBox(height: 10),
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(flex: 2, child: panelLeft),
                 const SizedBox(width: 10),
-                Expanded(child: allowancePanel),
+                Expanded(child: spentVsAllowancePanel),
               ],
             ),
           ],
@@ -3029,6 +3188,7 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
   }
 
   Future<void> _saveNewPassword() async {
+    final currentPassword = _currentPasswordController.text;
     final newPassword = _newPasswordController.text;
     final confirmPassword = _confirmPasswordController.text;
 
@@ -3039,6 +3199,14 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
 
     if (newPassword != confirmPassword) {
       await _showAlert(title: 'Mismatch', message: 'Passwords do not match.');
+      return;
+    }
+
+    if (currentPassword.isNotEmpty && newPassword == currentPassword) {
+      await _showAlert(
+        title: 'Use a Different Password',
+        message: 'Your new password must be different from your current password.',
+      );
       return;
     }
 
@@ -3160,7 +3328,7 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
                       label: Text(_isVerifying ? 'Verifying...' : 'Verify current password'),
                     ),
                   ] else ...[
-                    const Text('Now enter and confirm your new password.'),
+                    const Text('Now enter and confirm your new password. It must be different from your current password.'),
                     const SizedBox(height: 12),
                     TextField(
                       controller: _newPasswordController,
@@ -3377,713 +3545,4 @@ class _CurrencyPickerDialogState extends State<_CurrencyPickerDialog> {
     );
   }
 }
-
-class ProfilePage extends StatefulWidget {
-  const ProfilePage({super.key});
-
-  @override
-  State<ProfilePage> createState() => _ProfilePageState();
-}
-
-class _ProfilePageState extends State<ProfilePage> {
-  final _nameController = TextEditingController();
-  final _roleController = TextEditingController();
-  final _picker = ImagePicker();
-
-  String? _photoUrl;
-  String? _coverPhotoUrl;
-  Uint8List? _pendingPhotoBytes;
-  Uint8List? _pendingCoverBytes;
-  bool _loading = true;
-  bool _saving = false;
-  bool _uploadingPhoto = false;
-  bool _uploadingCover = false;
-  bool _isEditing = false;
-  bool _profileResolved = false;
-
-  @override
-  void initState() {
-    super.initState();
-    Future.delayed(const Duration(seconds: 12), () {
-      if (!mounted || _profileResolved) {
-        return;
-      }
-      _applyLocalProfileFallback();
-    });
-    _loadProfile();
-  }
-
-  @override
-  void dispose() {
-    _nameController.dispose();
-    _roleController.dispose();
-    super.dispose();
-  }
-
-  void _applyLocalProfileFallback() {
-    final user = FirebaseAuth.instance.currentUser;
-    final fallbackName =
-        ((user?.displayName ?? '').trim().isNotEmpty) ? user!.displayName!.trim() : 'User';
-    if (!mounted) return;
-    setState(() {
-      _nameController.text = fallbackName;
-      _roleController.text = 'Student';
-      _photoUrl = user?.photoURL;
-      _coverPhotoUrl = null;
-      _pendingPhotoBytes = null;
-      _pendingCoverBytes = null;
-      _loading = false;
-      _profileResolved = true;
-    });
-  }
-
-  Future<void> _loadProfile() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) {
-      if (mounted) {
-        setState(() => _loading = false);
-      }
-      return;
-    }
-
-    try {
-      final profile = await FirebaseService.getUserProfile(user.uid)
-          .timeout(const Duration(seconds: 10), onTimeout: () => null)
-          .catchError((_) => null);
-      final fullName = (profile?['fullName'] as String?)?.trim();
-      final role = (profile?['role'] as String?)?.trim();
-      final photoUrl = (profile?['photoUrl'] as String?)?.trim();
-      final coverPhotoUrl = (profile?['coverPhotoUrl'] as String?)?.trim();
-
-      final resolvedName =
-          (fullName != null && fullName.isNotEmpty)
-              ? fullName
-              : ((user.displayName ?? '').trim().isNotEmpty
-                  ? user.displayName!.trim()
-              : (((user.email ?? '').trim().isNotEmpty)
-                ? user.email!.trim().split('@').first
-                : 'User'));
-      final resolvedPhotoUrl =
-          (photoUrl != null && photoUrl.isNotEmpty) ? photoUrl : user.photoURL;
-
-      if ((fullName == null || fullName.isEmpty) ||
-          (photoUrl == null || photoUrl.isEmpty)) {
-        final userData = <String, dynamic>{
-          'fullName': resolvedName,
-          'email': (user.email ?? '').trim().toLowerCase(),
-          'emailLower': (user.email ?? '').trim().toLowerCase(),
-          'lastUpdated': DateTime.now(),
-        };
-        if (resolvedPhotoUrl != null && resolvedPhotoUrl.trim().isNotEmpty) {
-          userData['photoUrl'] = resolvedPhotoUrl;
-        }
-        try {
-          await FirebaseService.saveUserProfile(
-            userId: user.uid,
-            userData: userData,
-          ).timeout(const Duration(seconds: 8), onTimeout: () => null);
-        } catch (_) {
-          // Do not block profile rendering on a best-effort profile sync.
-        }
-      }
-
-      if (!mounted) return;
-      setState(() {
-        _nameController.text = resolvedName;
-        _roleController.text =
-            (role != null && role.isNotEmpty) ? role : 'Student';
-        _photoUrl = resolvedPhotoUrl;
-        _coverPhotoUrl =
-            (coverPhotoUrl != null && coverPhotoUrl.isNotEmpty)
-                ? coverPhotoUrl
-                : null;
-        _pendingPhotoBytes = null;
-        _pendingCoverBytes = null;
-        _loading = false;
-        _profileResolved = true;
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _nameController.text =
-            (user.displayName ?? '').trim().isNotEmpty
-                ? user.displayName!.trim()
-                : 'User';
-        _roleController.text = 'Student';
-        _photoUrl = user.photoURL;
-        _coverPhotoUrl = null;
-        _pendingPhotoBytes = null;
-        _pendingCoverBytes = null;
-        _loading = false;
-        _profileResolved = true;
-      });
-    }
-  }
-
-  Future<void> _pickAndUploadPhoto() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-
-    final previousPhotoUrl = _photoUrl;
-    final picked = await _picker.pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 65,
-      maxWidth: 1080,
-      maxHeight: 1080,
-    );
-    if (picked == null) {
-      return;
-    }
-
-    final previewBytes = await picked.readAsBytes();
-    if (!mounted) return;
-
-    setState(() {
-      _pendingPhotoBytes = previewBytes;
-      _uploadingPhoto = true;
-    });
-    var uploaded = false;
-    try {
-      final url = await FirebaseService.uploadProfileImageBytes(
-        userId: user.uid,
-        bytes: previewBytes,
-      );
-
-      if (url == null || url.isEmpty) {
-        if (mounted) {
-          setState(() {
-            _pendingPhotoBytes = null;
-            _photoUrl = previousPhotoUrl;
-          });
-        }
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Photo upload failed. Try again.')),
-          );
-        }
-        return;
-      }
-
-      if (mounted) {
-        setState(() {
-          _photoUrl = url;
-          _pendingPhotoBytes = null;
-          _uploadingPhoto = false;
-        });
-      }
-      uploaded = true;
-      final resolvedName = _nameController.text.trim().isEmpty
-          ? (((user.displayName ?? '').trim().isNotEmpty)
-              ? user.displayName!.trim()
-            : 'User')
-          : _nameController.text.trim();
-      final resolvedRole = _roleController.text.trim().isEmpty
-          ? 'Student'
-          : _roleController.text.trim();
-      await AuthService.updateUserProfile(
-        fullName: resolvedName,
-        photoUrl: url,
-      ).timeout(const Duration(seconds: 12), onTimeout: () {});
-      final userData = <String, dynamic>{
-        'fullName': resolvedName,
-        'role': resolvedRole,
-        'photoUrl': url,
-        'lastUpdated': DateTime.now(),
-      };
-      if (_coverPhotoUrl != null && _coverPhotoUrl!.trim().isNotEmpty) {
-        userData['coverPhotoUrl'] = _coverPhotoUrl;
-      }
-      await FirebaseService.saveUserProfile(
-        userId: user.uid,
-        userData: userData,
-      ).timeout(const Duration(seconds: 12), onTimeout: () {});
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Photo updated.')),
-        );
-      }
-    } catch (e) {
-      if (!mounted) return;
-      if (!uploaded) {
-        setState(() {
-          _pendingPhotoBytes = null;
-          _photoUrl = previousPhotoUrl;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Photo upload failed. Please try again.')),
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Photo uploaded. Sync in progress.'),
-          ),
-        );
-      }
-    } finally {
-      if (mounted && _uploadingPhoto) {
-        setState(() => _uploadingPhoto = false);
-      }
-    }
-  }
-
-  Future<void> _saveProfile() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-
-    final fullName = _nameController.text.trim();
-    final role = _roleController.text.trim();
-    if (fullName.isEmpty || role.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter name and role.')),
-      );
-      return;
-    }
-
-    setState(() => _saving = true);
-    try {
-      await AuthService.updateUserProfile(
-        fullName: fullName,
-        photoUrl: _photoUrl,
-      );
-      final userData = <String, dynamic>{
-        'fullName': fullName,
-        'role': role,
-        'lastUpdated': DateTime.now(),
-      };
-      if (_photoUrl != null && _photoUrl!.trim().isNotEmpty) {
-        userData['photoUrl'] = _photoUrl;
-      }
-      if (_coverPhotoUrl != null && _coverPhotoUrl!.trim().isNotEmpty) {
-        userData['coverPhotoUrl'] = _coverPhotoUrl;
-      }
-      await FirebaseService.saveUserProfile(
-        userId: user.uid,
-        userData: userData,
-      );
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Profile updated.')),
-        );
-        setState(() => _isEditing = false);
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _saving = false);
-      }
-    }
-  }
-
-  ImageProvider<Object>? _photoProvider() {
-    if (_pendingPhotoBytes != null && _pendingPhotoBytes!.isNotEmpty) {
-      return MemoryImage(_pendingPhotoBytes!);
-    }
-    if (_photoUrl == null || _photoUrl!.isEmpty) {
-      return null;
-    }
-    return NetworkImage(_photoUrl!);
-  }
-
-  ImageProvider<Object>? _coverProvider() {
-    if (_pendingCoverBytes != null && _pendingCoverBytes!.isNotEmpty) {
-      return MemoryImage(_pendingCoverBytes!);
-    }
-    if (_coverPhotoUrl == null || _coverPhotoUrl!.isEmpty) {
-      return null;
-    }
-    return NetworkImage(_coverPhotoUrl!);
-  }
-
-  Future<void> _pickAndUploadCoverPhoto() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-
-    final previousCoverUrl = _coverPhotoUrl;
-    final picked = await _picker.pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 70,
-      maxWidth: 1400,
-      maxHeight: 1400,
-    );
-    if (picked == null) return;
-
-    final previewBytes = await picked.readAsBytes();
-    if (!mounted) return;
-
-    setState(() {
-      _pendingCoverBytes = previewBytes;
-      _uploadingCover = true;
-    });
-    var uploaded = false;
-
-    try {
-      final url = await FirebaseService.uploadCoverImageBytes(
-        userId: user.uid,
-        bytes: previewBytes,
-      );
-
-      if (url == null || url.isEmpty) {
-        setState(() {
-          _pendingCoverBytes = null;
-          _coverPhotoUrl = previousCoverUrl;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Background upload failed.')),
-        );
-        return;
-      }
-
-      setState(() {
-        _coverPhotoUrl = url;
-        _pendingCoverBytes = null;
-        _uploadingCover = false;
-      });
-      uploaded = true;
-      final resolvedName = _nameController.text.trim().isEmpty
-          ? (((user.displayName ?? '').trim().isNotEmpty)
-              ? user.displayName!.trim()
-            : 'User')
-          : _nameController.text.trim();
-      final resolvedRole = _roleController.text.trim().isEmpty
-          ? 'Student'
-          : _roleController.text.trim();
-      await AuthService.updateUserProfile(
-        fullName: resolvedName,
-        photoUrl: _photoUrl,
-      ).timeout(const Duration(seconds: 12), onTimeout: () {});
-      final userData = <String, dynamic>{
-        'fullName': resolvedName,
-        'role': resolvedRole,
-        'coverPhotoUrl': url,
-        'lastUpdated': DateTime.now(),
-      };
-      if (_photoUrl != null && _photoUrl!.trim().isNotEmpty) {
-        userData['photoUrl'] = _photoUrl;
-      }
-      await FirebaseService.saveUserProfile(
-        userId: user.uid,
-        userData: userData,
-      ).timeout(const Duration(seconds: 12), onTimeout: () {});
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Background updated.')),
-        );
-      }
-    } catch (e) {
-      if (!mounted) return;
-      if (!uploaded) {
-        setState(() {
-          _pendingCoverBytes = null;
-          _coverPhotoUrl = previousCoverUrl;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Background upload failed. Please try again.')),
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Background uploaded. Sync in progress.'),
-          ),
-        );
-      }
-    } finally {
-      if (mounted && _uploadingCover) {
-        setState(() => _uploadingCover = false);
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final user = FirebaseAuth.instance.currentUser;
-
-    if (_loading) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    }
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Profile'),
-        actions: [
-          IconButton(
-            tooltip: _isEditing ? 'Cancel edit' : 'Edit profile',
-            onPressed: (_saving || _uploadingPhoto || _uploadingCover)
-                ? null
-                : () => setState(() {
-                      _isEditing = !_isEditing;
-                      if (!_isEditing) {
-                        _loadProfile();
-                      }
-                    }),
-            icon: Icon(_isEditing ? Icons.close : Icons.edit_outlined),
-          ),
-        ],
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(12),
-        children: [
-          Container(
-            decoration: BoxDecoration(
-              color: scheme.surface,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.5)),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
-              child: Column(
-                children: [
-                  GestureDetector(
-                    onTap: _isEditing && !_uploadingCover
-                        ? _pickAndUploadCoverPhoto
-                        : null,
-                    child: MouseRegion(
-                      cursor: _isEditing && !_uploadingCover
-                          ? SystemMouseCursors.click
-                          : SystemMouseCursors.basic,
-                      child: Container(
-                        height: 120,
-                        decoration: BoxDecoration(
-                          image: _coverProvider() != null
-                              ? DecorationImage(
-                                  image: _coverProvider()!,
-                                  fit: BoxFit.cover,
-                                )
-                              : null,
-                          gradient: _coverProvider() == null
-                              ? LinearGradient(
-                                  colors: [scheme.primary, scheme.primary.withValues(alpha: 0.78)],
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
-                                )
-                              : null,
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        child: Stack(
-                          children: [
-                            if (_coverProvider() != null)
-                              DecoratedBox(
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(14),
-                                  gradient: LinearGradient(
-                                    begin: Alignment.topCenter,
-                                    end: Alignment.bottomCenter,
-                                    colors: [
-                                      Colors.black.withValues(alpha: 0.12),
-                                      Colors.black.withValues(alpha: 0.28),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            if (_isEditing && !_uploadingCover)
-                              const Positioned.fill(
-                                child: Center(
-                                  child: Icon(
-                                    Icons.photo_camera_outlined,
-                                    color: Colors.white,
-                                    size: 36,
-                                  ),
-                                ),
-                              )
-                            else if (_uploadingCover)
-                              const Positioned.fill(
-                                child: Center(
-                                  child: SizedBox(
-                                    width: 32,
-                                    height: 32,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                  Transform.translate(
-                    offset: const Offset(0, -30),
-                    child: GestureDetector(
-                      onTap: _isEditing && !_uploadingPhoto
-                          ? _pickAndUploadPhoto
-                          : null,
-                      child: MouseRegion(
-                        cursor: _isEditing && !_uploadingPhoto
-                            ? SystemMouseCursors.click
-                            : SystemMouseCursors.basic,
-                        child: Stack(
-                          children: [
-                            CircleAvatar(
-                              radius: 42,
-                              backgroundColor: Colors.white,
-                              child: CircleAvatar(
-                                radius: 39,
-                                backgroundColor: scheme.primaryContainer,
-                                backgroundImage: _photoProvider(),
-                                child: _photoProvider() == null
-                                    ? Icon(Icons.person, size: 34, color: scheme.primary)
-                                    : null,
-                              ),
-                            ),
-                            if (_isEditing && !_uploadingPhoto)
-                              Positioned(
-                                bottom: 0,
-                                right: 0,
-                                child: Container(
-                                  decoration: BoxDecoration(
-                                    color: scheme.primary,
-                                    shape: BoxShape.circle,
-                                    border: Border.all(color: Colors.white, width: 2),
-                                  ),
-                                  padding: const EdgeInsets.all(6),
-                                  child: const Icon(
-                                    Icons.edit_outlined,
-                                    color: Colors.white,
-                                    size: 18,
-                                  ),
-                                ),
-                              )
-                            else if (_uploadingPhoto)
-                              Positioned(
-                                bottom: 0,
-                                right: 0,
-                                child: Container(
-                                  decoration: BoxDecoration(
-                                    color: scheme.primary,
-                                    shape: BoxShape.circle,
-                                    border: Border.all(color: Colors.white, width: 2),
-                                  ),
-                                  padding: const EdgeInsets.all(4),
-                                  child: const SizedBox(
-                                    width: 20,
-                                    height: 20,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    _nameController.text.trim().isEmpty
-                        ? 'User'
-                        : _nameController.text.trim(),
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    _roleController.text.trim().isEmpty
-                        ? 'Student'
-                        : _roleController.text.trim(),
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: scheme.onSurfaceVariant),
-                  ),
-                  if (_isEditing) const SizedBox(height: 12),
-                  if (_isEditing)
-                    Text(
-                      'Tap your profile photo or background to change them',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: scheme.onSurfaceVariant,
-                        fontStyle: FontStyle.italic,
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(14),
-              child: _isEditing
-                  ? Column(
-                      children: [
-                        TextField(
-                          controller: _nameController,
-                          decoration: const InputDecoration(
-                            labelText: 'Full name',
-                            prefixIcon: Icon(Icons.person_outline),
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        TextField(
-                          controller: _roleController,
-                          decoration: const InputDecoration(
-                            labelText: 'Role',
-                            prefixIcon: Icon(Icons.badge_outlined),
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        TextFormField(
-                          initialValue: user?.email ?? '',
-                          enabled: false,
-                          decoration: const InputDecoration(
-                            labelText: 'Email address',
-                            prefixIcon: Icon(Icons.email_outlined),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        FilledButton.icon(
-                          onPressed: _saving ? null : _saveProfile,
-                          icon: const Icon(Icons.save_outlined),
-                          label: Text(_saving ? 'Saving...' : 'Save profile'),
-                        ),
-                      ],
-                    )
-                  : Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          leading: const Icon(Icons.person_outline),
-                          title: const Text('Full name'),
-                          subtitle: Text(
-                            _nameController.text.trim().isEmpty
-                                ? 'Not set'
-                                : _nameController.text.trim(),
-                          ),
-                        ),
-                        ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          leading: const Icon(Icons.badge_outlined),
-                          title: const Text('Role'),
-                          subtitle: Text(
-                            _roleController.text.trim().isEmpty
-                                ? 'Not set'
-                                : _roleController.text.trim(),
-                          ),
-                        ),
-                        ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          leading: const Icon(Icons.email_outlined),
-                          title: const Text('Email address'),
-                          subtitle: Text(user?.email ?? 'No email'),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Tap the edit icon to update your details.',
-                          style: TextStyle(color: scheme.onSurfaceVariant),
-                        ),
-                      ],
-                    ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
+  

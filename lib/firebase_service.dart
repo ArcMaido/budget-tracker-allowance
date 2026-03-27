@@ -180,6 +180,31 @@ class FirebaseService {
 
   // ==================== STORAGE ====================
 
+  static Future<String> _getDownloadUrlWithRetry(Reference ref) async {
+    FirebaseException? lastFirebaseError;
+    for (var attempt = 1; attempt <= 8; attempt++) {
+      try {
+        // Ensure the object is visible before asking for its download URL.
+        await ref.getMetadata();
+        final url = await ref.getDownloadURL();
+        if (url.trim().isNotEmpty) {
+          return url.trim();
+        }
+      } on FirebaseException catch (e) {
+        lastFirebaseError = e;
+        if (e.code != 'object-not-found') {
+          rethrow;
+        }
+      }
+      await Future.delayed(Duration(milliseconds: 350 * attempt));
+    }
+
+    if (lastFirebaseError != null) {
+      throw lastFirebaseError;
+    }
+    throw Exception('Unable to get download URL after upload.');
+  }
+
   static Future<String?> _uploadImageWithRetry({
     required String userId,
     required String filePath,
@@ -196,16 +221,16 @@ class FirebaseService {
 
     for (var attempt = 1; attempt <= 3; attempt++) {
       try {
-        final stamp = DateTime.now().millisecondsSinceEpoch;
+        final stamp = DateTime.now().microsecondsSinceEpoch;
         final ref = _storage
             .ref()
-            .child('users/$userId/$folder/${filePrefix}_$stamp.jpg');
+            .child('users/$userId/$folder/${filePrefix}_${stamp}_$attempt.jpg');
         final task = ref.putFile(
           file,
           SettableMetadata(contentType: 'image/jpeg'),
         );
         await task.timeout(const Duration(seconds: 60));
-        final url = await ref.getDownloadURL();
+        final url = await _getDownloadUrlWithRetry(ref);
         if (url.trim().isNotEmpty) {
           return url.trim();
         }
@@ -246,16 +271,16 @@ class FirebaseService {
 
     for (var attempt = 1; attempt <= 3; attempt++) {
       try {
-        final stamp = DateTime.now().millisecondsSinceEpoch;
+        final stamp = DateTime.now().microsecondsSinceEpoch;
         final ref = _storage
             .ref()
-            .child('users/$userId/$folder/${filePrefix}_$stamp.jpg');
+            .child('users/$userId/$folder/${filePrefix}_${stamp}_$attempt.jpg');
         final task = ref.putData(
           bytes,
           SettableMetadata(contentType: 'image/jpeg'),
         );
         await task.timeout(const Duration(seconds: 60));
-        final url = await ref.getDownloadURL();
+        final url = await _getDownloadUrlWithRetry(ref);
         if (url.trim().isNotEmpty) {
           return url.trim();
         }

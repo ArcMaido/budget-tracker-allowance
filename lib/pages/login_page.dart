@@ -100,7 +100,12 @@ class _LoginPageState extends State<LoginPage> {
   Future<void> _openForgotPassword() async {
     if (_isLoading) return;
     await Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => const ForgotPasswordPage()),
+      MaterialPageRoute<void>(
+        builder: (_) => ForgotPasswordPage(
+          isDarkMode: widget.isDarkMode,
+          onToggleDarkMode: widget.onToggleDarkMode,
+        ),
+      ),
     );
   }
 

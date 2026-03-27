@@ -22,11 +22,84 @@ class AuthService {
   static final GoogleSignIn _googleSignIn = GoogleSignIn();
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   static const String _forceLoginAfterSignupKey = 'force_login_after_signup';
+  static const String _passwordResetContinueUrl =
+      'https://allowance-budget-tracker.firebaseapp.com/reset-password';
+  static const String _androidPackageName =
+      'com.app.allowance_budget_dashboard';
 
   static bool _isKnownPigeonCastIssue(Object error) {
     final message = error.toString();
     return message.contains('PigeonUserDetails') ||
-        message.contains("List<Object> is not a subtype");
+      message.contains('PigeonUserInfo') ||
+      message.contains("List<Object> is not a subtype") ||
+      message.contains("List<Object?> is not a subtype");
+  }
+
+  static String _formatNameFromEmailLocalPart(String email) {
+    final rawLocalPart = email.trim().split('@').first.trim();
+    if (rawLocalPart.isEmpty) {
+      return '';
+    }
+
+    var localPart = rawLocalPart;
+    while (localPart.startsWith('"') || localPart.startsWith("'")) {
+      localPart = localPart.substring(1).trimLeft();
+    }
+    while (localPart.endsWith('"') || localPart.endsWith("'")) {
+      localPart = localPart.substring(0, localPart.length - 1).trimRight();
+    }
+    if (localPart.isEmpty) {
+      return '';
+    }
+
+    final tokens = localPart
+        .replaceAll(RegExp(r'[._-]+'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim()
+        .split(' ')
+        .where((part) => part.trim().isNotEmpty)
+        .toList();
+
+    if (tokens.isEmpty) {
+      return '';
+    }
+
+    return tokens
+        .map((part) => part[0].toUpperCase() + part.substring(1).toLowerCase())
+        .join(' ')
+        .trim();
+  }
+
+  static String _resolvePreferredName({
+    required String email,
+    String? displayName,
+    String? fallback,
+  }) {
+    final fromDisplay = (displayName ?? '').trim();
+    if (fromDisplay.isNotEmpty) {
+      return fromDisplay;
+    }
+
+    final fromFallback = (fallback ?? '').trim();
+    if (fromFallback.isNotEmpty) {
+      return fromFallback;
+    }
+
+    final fromEmail = _formatNameFromEmailLocalPart(email);
+    if (fromEmail.isNotEmpty) {
+      return fromEmail;
+    }
+
+    return 'User';
+  }
+
+  static bool _isJustCreatedUser(User user, {int windowSeconds = 120}) {
+    final createdAt = user.metadata.creationTime;
+    final signedInAt = user.metadata.lastSignInTime;
+    if (createdAt == null || signedInAt == null) {
+      return false;
+    }
+    return createdAt.difference(signedInAt).inSeconds.abs() <= windowSeconds;
   }
 
   // Get current user
@@ -153,13 +226,7 @@ class AuthService {
           final profile = profileDoc.data();
           final storedName = (profile?['fullName'] as String?)?.trim();
           final storedPhoto = (profile?['photoUrl'] as String?)?.trim();
-          final justCreated = userCredential.user!.metadata.creationTime != null &&
-            userCredential.user!.metadata.lastSignInTime != null &&
-            userCredential.user!.metadata.creationTime!
-              .difference(userCredential.user!.metadata.lastSignInTime!)
-              .inSeconds
-              .abs() <=
-            10;
+          final justCreated = _isJustCreatedUser(userCredential.user!);
           final remoteIsNewUser = (profile?['isNewUser'] == true) || (profile == null && justCreated);
           final remoteOnboardingDone = profile?['onboardingCompleted'] == true;
 
@@ -229,9 +296,23 @@ class AuthService {
       final userCredential = await _auth.signInWithCredential(credential);
       if (userCredential.user != null) {
         final isNewGoogleUser = userCredential.additionalUserInfo?.isNewUser ?? false;
+        final resolvedGoogleName = _resolvePreferredName(
+          email: googleUser.email,
+          displayName: googleUser.displayName,
+          fallback: userCredential.user!.displayName,
+        );
+
+        try {
+          if ((userCredential.user!.displayName ?? '').trim() != resolvedGoogleName) {
+            await userCredential.user!.updateDisplayName(resolvedGoogleName);
+          }
+        } catch (_) {
+          // Best-effort only. Firestore profile still stores the resolved name.
+        }
+
         await _saveUserProfile(
           userCredential.user!,
-          googleUser.displayName ?? 'Google User',
+          resolvedGoogleName,
           googleUser.email,
           isNewUser: isNewGoogleUser,
           photoUrl: userCredential.user!.photoURL,
@@ -270,7 +351,10 @@ class AuthService {
 
       final prefill = GoogleSignupPrefill(
         email: googleUser.email,
-        displayName: googleUser.displayName,
+        displayName: _resolvePreferredName(
+          email: googleUser.email,
+          displayName: googleUser.displayName,
+        ),
         photoUrl: googleUser.photoUrl,
       );
 
@@ -467,11 +551,14 @@ class AuthService {
       final existingName = (existing.data()?['fullName'] as String?)?.trim() ?? '';
       final candidateFromInput = fullName.trim();
       final candidateFromAuth = (user.displayName ?? '').trim();
+        final candidateFromEmail = _formatNameFromEmailLocalPart(normalizedEmail);
       final resolvedName = candidateFromInput.isNotEmpty
           ? candidateFromInput
           : (existingName.isNotEmpty
               ? existingName
-              : (candidateFromAuth.isNotEmpty ? candidateFromAuth : 'User'));
+            : (candidateFromAuth.isNotEmpty
+              ? candidateFromAuth
+              : (candidateFromEmail.isNotEmpty ? candidateFromEmail : 'User')));
       await _firestore.collection('users').doc(user.uid).set(
         {
           'uid': user.uid,
@@ -490,6 +577,7 @@ class AuthService {
       );
     } catch (e) {
       print('Error saving user profile: $e');
+      rethrow;
     }
   }
 
@@ -528,7 +616,30 @@ class AuthService {
   // Reset password
   static Future<void> resetPassword({required String email}) async {
     try {
-      await _auth.sendPasswordResetEmail(email: email);
+      final settings = ActionCodeSettings(
+        url: _passwordResetContinueUrl,
+        handleCodeInApp: true,
+        androidPackageName: _androidPackageName,
+        androidInstallApp: true,
+      );
+
+      try {
+        await _auth.sendPasswordResetEmail(
+          email: email,
+          actionCodeSettings: settings,
+        );
+      } on FirebaseAuthException catch (e) {
+        // Fallback to default Firebase link when continue URL / app links are
+        // not fully configured yet in Firebase Console.
+        final isContinueUrlConfigIssue =
+            e.code == 'invalid-continue-uri' ||
+            e.code == 'unauthorized-continue-uri' ||
+            e.code == 'missing-android-pkg-name';
+        if (!isContinueUrlConfigIssue) {
+          rethrow;
+        }
+        await _auth.sendPasswordResetEmail(email: email);
+      }
     } catch (e) {
       print('Password reset error: $e');
       rethrow;
@@ -624,25 +735,47 @@ class AuthService {
     required String fullName,
     String? photoUrl,
   }) async {
+    final user = _auth.currentUser;
+    if (user == null) {
+      throw Exception('No authenticated user found.');
+    }
+
     try {
-      final user = _auth.currentUser;
-      if (user != null) {
-        await user.updateDisplayName(fullName);
-        if (photoUrl != null) {
-          await user.updatePhotoURL(photoUrl);
-        }
-        await user.reload();
-        final refreshedUser = _auth.currentUser ?? user;
-        await _saveUserProfile(
-          refreshedUser,
-          fullName,
-          refreshedUser.email ?? '',
-          photoUrl: photoUrl,
-        );
-        await _syncToLocalStorage(refreshedUser);
+      await user.updateDisplayName(fullName);
+      if (photoUrl != null) {
+        await user.updatePhotoURL(photoUrl);
       }
+    } on FirebaseAuthException {
+      rethrow;
     } catch (e) {
-      print('Error updating profile: $e');
+      if (!_isKnownPigeonCastIssue(e)) {
+        print('Error updating auth profile: $e');
+        rethrow;
+      }
+      // On some plugin versions, profile updates can succeed while a bridge
+      // cast error is thrown afterwards. Continue with best-effort sync.
+      print('Ignoring known plugin bridge cast issue during profile update: $e');
+    }
+
+    try {
+      await user.reload();
+    } catch (e) {
+      if (!_isKnownPigeonCastIssue(e)) {
+        print('User reload warning: $e');
+      }
+    }
+
+    final refreshedUser = _auth.currentUser ?? user;
+    try {
+      await _saveUserProfile(
+        refreshedUser,
+        fullName,
+        refreshedUser.email ?? '',
+        photoUrl: photoUrl,
+      );
+      await _syncToLocalStorage(refreshedUser);
+    } catch (e) {
+      print('Error syncing updated profile: $e');
       rethrow;
     }
   }
@@ -712,9 +845,11 @@ class AuthService {
         return resolved;
       }
 
-      final remoteIsNewUser = profile['isNewUser'] == true;
+        final remoteIsNewUser = profile['isNewUser'] == true;
       final remoteOnboardingDone = profile['onboardingCompleted'] == true;
-      final resolved = remoteOnboardingDone ? false : (remoteIsNewUser || localIsNewUser);
+        final justCreated = _isJustCreatedUser(user);
+        final resolved =
+          remoteOnboardingDone ? false : (remoteIsNewUser || localIsNewUser || justCreated);
 
       await prefs.setBool('isNewUser', resolved);
       await prefs.setBool('onboardingCompleted', remoteOnboardingDone);

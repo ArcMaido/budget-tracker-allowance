@@ -3,7 +3,14 @@ import 'package:flutter/material.dart';
 import '../auth_service.dart';
 
 class ForgotPasswordPage extends StatefulWidget {
-  const ForgotPasswordPage({super.key});
+  const ForgotPasswordPage({
+    super.key,
+    this.isDarkMode = false,
+    this.onToggleDarkMode,
+  });
+
+  final bool isDarkMode;
+  final ValueChanged<bool>? onToggleDarkMode;
 
   @override
   State<ForgotPasswordPage> createState() => _ForgotPasswordPageState();
@@ -13,7 +20,6 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
   final _emailController = TextEditingController();
   bool _isSendingLink = false;
   bool _linkSent = false;
-  String _sentEmail = '';
 
   @override
   void dispose() {
@@ -67,11 +73,10 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
 
       setState(() {
         _linkSent = true;
-        _sentEmail = email;
       });
       await _showAlert(
         title: 'Reset Link Sent',
-        message: 'We sent a password reset email to $email. Open the email and use the link to set a new password.',
+        message: 'We sent a password reset email to $email. Open the email and click the link to set a new password.',
         success: true,
       );
     } catch (e) {
@@ -97,16 +102,28 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
             color: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.5),
             borderRadius: BorderRadius.circular(8),
           ),
-          child: Text(
-            'We will email a secure reset link. In your email template, use this CTA text: Click here to set new password and recover your account.',
-            style: Theme.of(context).textTheme.bodySmall,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Password Reset Process',
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '1. Enter your email address\n2. Check your inbox for the reset email\n3. Tap "Click here to set new password and recover your account"\n4. Enter and confirm your new password in the reset page',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
           ),
         ),
         const SizedBox(height: 12),
         TextField(
           controller: _emailController,
           keyboardType: TextInputType.emailAddress,
-          enabled: !_isSendingLink,
+          enabled: !_isSendingLink && !_linkSent,
           decoration: const InputDecoration(
             labelText: 'Email address',
             prefixIcon: Icon(Icons.email_outlined),
@@ -114,7 +131,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
         ),
         const SizedBox(height: 12),
         FilledButton.icon(
-          onPressed: _isSendingLink ? null : _sendResetLink,
+          onPressed: _isSendingLink || _linkSent ? null : _sendResetLink,
           icon: _isSendingLink
               ? const SizedBox(
                   width: 18,
@@ -125,22 +142,29 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
           label: Text(_isSendingLink ? 'Sending...' : 'Send Reset Link'),
         ),
         if (_linkSent) ...[
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
               color: Theme.of(context).colorScheme.secondaryContainer.withValues(alpha: 0.55),
               borderRadius: BorderRadius.circular(8),
             ),
-            child: Text(
-              'Reset email sent to $_sentEmail. Open your inbox, then click the link to set your new password and recover your account.',
-              style: Theme.of(context).textTheme.bodySmall,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '✓ Email sent successfully',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Open your inbox and look for the email. Click the "Click here to set new password and recover your account" button to proceed.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
             ),
-          ),
-          const SizedBox(height: 6),
-          TextButton(
-            onPressed: _isSendingLink ? null : _sendResetLink,
-            child: const Text('Resend link'),
           ),
         ],
         const SizedBox(height: 6),
@@ -170,7 +194,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                   Row(
                     children: [
                       IconButton(
-                        onPressed: () => Navigator.of(context).pop(),
+                        onPressed: _isSendingLink ? null : () => Navigator.of(context).pop(),
                         icon: const Icon(Icons.arrow_back),
                       ),
                     ],
@@ -200,7 +224,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    'Enter your account email and we will send a secure reset link.',
+                    'We\'ll send you a secure reset link to recover your account',
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           color: scheme.onSurfaceVariant,
@@ -222,3 +246,4 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
     );
   }
 }
+
