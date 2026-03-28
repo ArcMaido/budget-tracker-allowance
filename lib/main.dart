@@ -15,6 +15,7 @@ import 'data_service.dart';
 import 'firebase_service.dart';
 import 'firebase_options.dart';
 import 'pages/login_page.dart';
+import 'pages/started_page.dart';
 import 'pages/onboarding_page.dart';
 import 'pages/profile_page.dart';
 
@@ -36,6 +37,7 @@ class AllowanceBudgetApp extends StatefulWidget {
 
 class _AllowanceBudgetAppState extends State<AllowanceBudgetApp> {
   bool _darkMode = false;
+  bool _showGetStarted = true;
 
   @override
   void initState() {
@@ -96,7 +98,7 @@ class _AllowanceBudgetAppState extends State<AllowanceBudgetApp> {
 
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'Allowance Budget Dashboard',
+      title: 'Coinzy',
       themeAnimationDuration: const Duration(milliseconds: 280),
       themeAnimationCurve: Curves.easeInOutCubic,
       themeMode: _darkMode ? ThemeMode.dark : ThemeMode.light,
@@ -142,7 +144,15 @@ class _AllowanceBudgetAppState extends State<AllowanceBudgetApp> {
           ),
         ),
       ),
-      home: _buildAuthFlow(),
+      home: _showGetStarted
+          ? GetStartedPage(
+              onGetStarted: () {
+                if (mounted) {
+                  setState(() => _showGetStarted = false);
+                }
+              },
+            )
+          : _buildAuthFlow(),
     );
   }
 
@@ -216,13 +226,15 @@ class _UserAuthWrapperState extends State<UserAuthWrapper> {
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user != null) {
-        // Retry a few times so fresh sign-in writes are reflected immediately.
+        // Retry with increased delays to allow Firestore replication to complete.
+        // This ensures that on first login after signup, we properly detect the new user status.
         var isNewUser = false;
-        for (var attempt = 0; attempt < 3; attempt++) {
+        for (var attempt = 0; attempt < 6; attempt++) {
           if (attempt > 0) {
-            await Future.delayed(const Duration(milliseconds: 350));
+            await Future.delayed(const Duration(milliseconds: 500));
           }
           isNewUser = await AuthService.isNewUser();
+          debugPrint('Onboarding check attempt $attempt: isNewUser=$isNewUser');
           if (isNewUser) {
             break;
           }
@@ -239,6 +251,7 @@ class _UserAuthWrapperState extends State<UserAuthWrapper> {
         }
       }
     } catch (e) {
+      debugPrint('Error checking onboarding status: $e');
       if (mounted) {
         setState(() => _isLoading = false);
       }
@@ -862,7 +875,8 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
 
       await showDialog<void>(
         context: context,
-        barrierDismissible: true,
+        useRootNavigator: true,
+        barrierDismissible: false,
         builder: (dialogContext) {
           return AlertDialog(
             title: Row(
@@ -889,6 +903,15 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
       debugPrint('[Success Alert] Dialog dismissed: $title');
     } catch (e) {
       debugPrint('[Success Alert] Error showing alert: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('$title: $message'),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
     }
   }
 
@@ -1047,101 +1070,89 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
     required List<String> monthOptions,
   }) {
     final showProfileButton = _selectedNavIndex != 5;
+    final sectionKey = <int, String>{
+      0: 'overview',
+      1: 'expenses',
+      2: 'categories',
+      3: 'monthly',
+      4: 'history',
+      5: 'about',
+    }[_selectedNavIndex] ?? 'section';
     Widget section;
     switch (_selectedNavIndex) {
       case 0:
-        section = SingleChildScrollView(
-          key: const ValueKey('overview'),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildHeader(now),
-              const SizedBox(height: 10),
-              _buildSummary(stats),
-              const SizedBox(height: 10),
-              _buildVisualsSection(),
-            ],
-          ),
+        section = Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildSummary(stats),
+            const SizedBox(height: 10),
+            _buildVisualsSection(),
+          ],
         );
         break;
       case 1:
-        section = SingleChildScrollView(
-          key: const ValueKey('expenses'),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildSectionHeading(
-                title: 'Expenses',
-                subtitle: 'Add and monitor expenses quickly with clear guidance.',
-              ),
-              const SizedBox(height: 10),
-              _buildMainArea(stats, categoryNames),
-            ],
-          ),
+        section = Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildSectionHeading(
+              title: 'Expenses',
+              subtitle: 'Add and monitor expenses quickly with clear guidance.',
+            ),
+            const SizedBox(height: 10),
+            _buildMainArea(stats, categoryNames),
+          ],
         );
         break;
       case 2:
-        section = SingleChildScrollView(
-          key: const ValueKey('categories'),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildSectionHeading(
-                title: 'Categories',
-                subtitle: 'Set category budgets to make spending limits easier to follow.',
-              ),
-              const SizedBox(height: 10),
-              _buildCategorySection(),
-            ],
-          ),
+        section = Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildSectionHeading(
+              title: 'Categories',
+              subtitle: 'Set category budgets to make spending limits easier to follow.',
+            ),
+            const SizedBox(height: 10),
+            _buildCategorySection(),
+          ],
         );
         break;
       case 3:
-        section = SingleChildScrollView(
-          key: const ValueKey('monthly'),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildSectionHeading(
-                title: 'Monthly Summaries Table',
-                subtitle: 'Review monthly totals in a clean table view.',
-              ),
-              const SizedBox(height: 10),
-              _buildMonthlySection(),
-            ],
-          ),
+        section = Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildSectionHeading(
+              title: 'Monthly Summaries Table',
+              subtitle: 'Review monthly totals in a clean table view.',
+            ),
+            const SizedBox(height: 10),
+            _buildMonthlySection(),
+          ],
         );
         break;
       case 4:
-        section = SingleChildScrollView(
-          key: const ValueKey('history'),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildSectionHeading(
-                title: 'Transaction History',
-                subtitle: 'Filter and search your transactions without scrolling through other sections.',
-              ),
-              const SizedBox(height: 10),
-              _buildHistorySection(txRows, categoryNames, monthOptions),
-            ],
-          ),
+        section = Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildSectionHeading(
+              title: 'Transaction History',
+              subtitle: 'Filter and search your transactions without scrolling through other sections.',
+            ),
+            const SizedBox(height: 10),
+            _buildHistorySection(txRows, categoryNames, monthOptions),
+          ],
         );
         break;
       case 5:
-        section = SingleChildScrollView(
-          key: const ValueKey('about'),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildSectionHeading(
-                title: 'About',
-                subtitle: 'About this allowance and budget tracker.',
-              ),
-              const SizedBox(height: 10),
-              _buildAboutCard(),
-            ],
-          ),
+        section = Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildSectionHeading(
+              title: 'About',
+              subtitle: 'About this allowance and budget tracker.',
+            ),
+            const SizedBox(height: 10),
+            _buildAboutCard(),
+          ],
         );
         break;
       default:
@@ -1165,10 +1176,15 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
             ],
           ),
           const SizedBox(height: 10),
-          Expanded(child: section),
+          section,
         ],
       );
     }
+
+    section = SingleChildScrollView(
+      key: ValueKey(sectionKey),
+      child: section,
+    );
 
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 220),
@@ -1191,54 +1207,6 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
         const SizedBox(height: 4),
         Text(subtitle),
       ],
-    );
-  }
-
-  Widget _buildHeader(DateTime now) {
-    final scheme = Theme.of(context).colorScheme;
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final heading = Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Allowance Budget Tracker',
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 4),
-            const Text('Track your allowance, spending, and savings in one clear view.'),
-          ],
-        );
-
-        final dateLabel = Center(
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.calendar_today_outlined, size: 20, color: scheme.primary),
-              const SizedBox(width: 8),
-              Text(
-                DateFormat('EEEE, MMM d, yyyy').format(now),
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                  color: scheme.onSurface,
-                ),
-              ),
-            ],
-          ),
-        );
-
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            heading,
-            const SizedBox(height: 12),
-            dateLabel,
-          ],
-        );
-      },
     );
   }
 
@@ -2252,7 +2220,7 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Allowance Budget Tracker', style: TextStyle(fontWeight: FontWeight.w700)),
+            const Text('Coinzy', style: TextStyle(fontWeight: FontWeight.w700)),
             const SizedBox(height: 6),
             const Text('This app helps students track monthly allowance, categorize expenses, and review spending trends with simple and clear sections.'),
             const SizedBox(height: 8),

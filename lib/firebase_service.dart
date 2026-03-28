@@ -182,10 +182,8 @@ class FirebaseService {
 
   static Future<String> _getDownloadUrlWithRetry(Reference ref) async {
     FirebaseException? lastFirebaseError;
-    for (var attempt = 1; attempt <= 8; attempt++) {
+    for (var attempt = 1; attempt <= 12; attempt++) {
       try {
-        // Ensure the object is visible before asking for its download URL.
-        await ref.getMetadata();
         final url = await ref.getDownloadURL();
         if (url.trim().isNotEmpty) {
           return url.trim();
@@ -196,7 +194,8 @@ class FirebaseService {
           rethrow;
         }
       }
-      await Future.delayed(Duration(milliseconds: 350 * attempt));
+      final delayMs = (180 * attempt).clamp(180, 1500);
+      await Future.delayed(Duration(milliseconds: delayMs));
     }
 
     if (lastFirebaseError != null) {

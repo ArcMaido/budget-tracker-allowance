@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 class GoogleSignupPrefill {
@@ -85,12 +86,20 @@ class AuthService {
       return fromFallback;
     }
 
-    final fromEmail = _formatNameFromEmailLocalPart(email);
-    if (fromEmail.isNotEmpty) {
-      return fromEmail;
-    }
-
     return 'User';
+  }
+
+  static bool _looksLikeEmailDerivedName(String? name, String? email) {
+    final value = (name ?? '').trim().toLowerCase();
+    final e = (email ?? '').trim().toLowerCase();
+    if (value.isEmpty || e.isEmpty || !e.contains('@')) {
+      return false;
+    }
+    final local = e.split('@').first.trim();
+    final localSpaced = _formatNameFromEmailLocalPart(e).toLowerCase();
+    final compact = localSpaced.replaceAll(' ', '');
+    final normalized = value.replaceAll(RegExp(r'\s+'), ' ').trim();
+    return normalized == local || normalized == localSpaced || normalized == compact;
   }
 
   static bool _isJustCreatedUser(User user, {int windowSeconds = 120}) {
@@ -137,9 +146,11 @@ class AuthService {
         );
         await _syncToLocalStorage(refreshedUser);
         
-        // Mark as new user in local preferences
+        // Mark as new user in local preferences - this persists across sign-out
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('isNewUser', true);
+        await prefs.setBool('onboardingCompleted', false);
+        debugPrint('Signup completed: userId=${refreshedUser.uid}, isNewUser=true');
       }
       return userCredential;
     } on FirebaseAuthException catch (e) {
@@ -226,23 +237,51 @@ class AuthService {
           final profile = profileDoc.data();
           final storedName = (profile?['fullName'] as String?)?.trim();
           final storedPhoto = (profile?['photoUrl'] as String?)?.trim();
+          final authName = (userCredential.user!.displayName ?? '').trim();
+          final shouldPreferAuthName =
+              authName.isNotEmpty &&
+              !_looksLikeEmailDerivedName(authName, userCredential.user!.email) &&
+              (storedName == null ||
+                  storedName.isEmpty ||
+                  _looksLikeEmailDerivedName(storedName, userCredential.user!.email));
           final justCreated = _isJustCreatedUser(userCredential.user!);
           final remoteIsNewUser = (profile?['isNewUser'] == true) || (profile == null && justCreated);
           final remoteOnboardingDone = profile?['onboardingCompleted'] == true;
 
-          if (storedName != null && storedName.isNotEmpty) {
+          if (shouldPreferAuthName) {
+            await _firestore.collection('users').doc(userCredential.user!.uid).set({
+              'fullName': authName,
+              'lastUpdated': DateTime.now(),
+            }, SetOptions(merge: true));
+            await userCredential.user!.updateDisplayName(authName);
+          } else if (storedName != null && storedName.isNotEmpty) {
             await userCredential.user!.updateDisplayName(storedName);
           }
           if (storedPhoto != null && storedPhoto.isNotEmpty) {
             await userCredential.user!.updatePhotoURL(storedPhoto);
           }
           final prefs = await SharedPreferences.getInstance();
-          await prefs.setBool('isNewUser', remoteIsNewUser && !remoteOnboardingDone);
+          final isNewUser = remoteIsNewUser && !remoteOnboardingDone;
+          await prefs.setBool('isNewUser', isNewUser);
           await prefs.setBool('onboardingCompleted', remoteOnboardingDone);
+          debugPrint('Login profile sync: isNewUser=$isNewUser, remoteIsNewUser=$remoteIsNewUser, remoteOnboardingDone=$remoteOnboardingDone, justCreated=$justCreated');
           await userCredential.user!.reload();
           syncedUser = _auth.currentUser ?? userCredential.user!;
-        } catch (_) {
-          // Ignore profile sync issues and keep sign-in successful.
+        } catch (e) {
+          // If profile sync fails, still ensure we preserve the isNewUser flag if it was set during signup.
+          // This handles Firestore replication delays on first login after signup.
+          try {
+            final prefs = await SharedPreferences.getInstance();
+            final existingIsNewUser = prefs.getBool('isNewUser') ?? false;
+            final justCreated = _isJustCreatedUser(userCredential.user!);
+            debugPrint('Profile sync failed, preserving flags. existingIsNewUser=$existingIsNewUser, justCreated=$justCreated, error=$e');
+            // If we had isNewUser set from signup, keep it. Or if the user was just created, mark as new.
+            if (existingIsNewUser || justCreated) {
+              await prefs.setBool('isNewUser', true);
+            }
+          } catch (prefError) {
+            debugPrint('Error preserving isNewUser flag: $prefError');
+          }
         }
         await _syncToLocalStorage(syncedUser);
       }
@@ -320,6 +359,7 @@ class AuthService {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('isNewUser', isNewGoogleUser);
         await prefs.setBool('onboardingCompleted', !isNewGoogleUser);
+        debugPrint('Google sign-in: userId=${userCredential.user!.uid}, isNewUser=$isNewGoogleUser');
         await _syncToLocalStorage(userCredential.user!);
       }
       return userCredential;
@@ -551,14 +591,13 @@ class AuthService {
       final existingName = (existing.data()?['fullName'] as String?)?.trim() ?? '';
       final candidateFromInput = fullName.trim();
       final candidateFromAuth = (user.displayName ?? '').trim();
-        final candidateFromEmail = _formatNameFromEmailLocalPart(normalizedEmail);
       final resolvedName = candidateFromInput.isNotEmpty
           ? candidateFromInput
           : (existingName.isNotEmpty
               ? existingName
             : (candidateFromAuth.isNotEmpty
               ? candidateFromAuth
-              : (candidateFromEmail.isNotEmpty ? candidateFromEmail : 'User')));
+              : 'User'));
       await _firestore.collection('users').doc(user.uid).set(
         {
           'uid': user.uid,
@@ -830,30 +869,38 @@ class AuthService {
         return localIsNewUser;
       }
 
-      final doc = await _firestore.collection('users').doc(user.uid).get();
-      final profile = doc.data();
-      if (profile == null) {
-        final justCreated = user.metadata.creationTime != null &&
-            user.metadata.lastSignInTime != null &&
-            user.metadata.creationTime!
-                .difference(user.metadata.lastSignInTime!)
-                .inSeconds
-                .abs() <=
-            10;
-        final resolved = localIsNewUser || justCreated;
-        await prefs.setBool('isNewUser', resolved);
-        return resolved;
-      }
+      try {
+        final doc = await _firestore.collection('users').doc(user.uid).get();
+        final profile = doc.data();
+        if (profile == null) {
+          final justCreated = user.metadata.creationTime != null &&
+              user.metadata.lastSignInTime != null &&
+              user.metadata.creationTime!
+                  .difference(user.metadata.lastSignInTime!)
+                  .inSeconds
+                  .abs() <=
+              10;
+          final resolved = localIsNewUser || justCreated;
+          await prefs.setBool('isNewUser', resolved);
+          debugPrint('isNewUser: profile null, localIsNewUser=$localIsNewUser, justCreated=$justCreated, resolved=$resolved');
+          return resolved;
+        }
 
         final remoteIsNewUser = profile['isNewUser'] == true;
-      final remoteOnboardingDone = profile['onboardingCompleted'] == true;
+        final remoteOnboardingDone = profile['onboardingCompleted'] == true;
         final justCreated = _isJustCreatedUser(user);
         final resolved =
-          remoteOnboardingDone ? false : (remoteIsNewUser || localIsNewUser || justCreated);
+            remoteOnboardingDone ? false : (remoteIsNewUser || localIsNewUser || justCreated);
 
-      await prefs.setBool('isNewUser', resolved);
-      await prefs.setBool('onboardingCompleted', remoteOnboardingDone);
-      return resolved;
+        await prefs.setBool('isNewUser', resolved);
+        await prefs.setBool('onboardingCompleted', remoteOnboardingDone);
+        debugPrint('isNewUser: profile exists, remoteIsNewUser=$remoteIsNewUser, remoteOnboardingDone=$remoteOnboardingDone, justCreated=$justCreated, resolved=$resolved');
+        return resolved;
+      } catch (e) {
+        // If we can't fetch remote profile, fall back to local state
+        debugPrint('isNewUser: Failed to fetch remote profile, using local flag. error=$e, localIsNewUser=$localIsNewUser');
+        return localIsNewUser;
+      }
     } catch (e) {
       print('Error checking if user is new: $e');
       return false;

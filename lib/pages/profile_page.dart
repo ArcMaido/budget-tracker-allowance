@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../firebase_service.dart';
 import '../auth_service.dart';
@@ -140,16 +142,19 @@ class _ProfilePageState extends State<ProfilePage> {
     required String? profileName,
     required String? providerDisplayName,
     required String? authDisplayName,
+    required String? localCachedDisplayName,
     required String? email,
   }) {
     final p = (profileName ?? '').trim();
     final g = (providerDisplayName ?? '').trim();
     final a = (authDisplayName ?? '').trim();
-    final fallbackName = _signupStyleEmailFallback(email);
+    final l = (localCachedDisplayName ?? '').trim();
+    final pLower = p.toLowerCase();
+    final aLower = a.toLowerCase();
+    final lLower = l.toLowerCase();
 
-    // Stored name (in Firestore) is explicit; use it regardless of email-derived checks.
-    // It was intentionally set during signup or profile edit.
-    if (p.isNotEmpty) {
+    // Use explicit stored name if it is not derived from email local-part.
+    if (p.isNotEmpty && pLower != 'user' && !_isEmailDerivedName(p, email)) {
       return p;
     }
     // Prefer Google-provided display name (skipping email-derived sources).
@@ -160,11 +165,23 @@ class _ProfilePageState extends State<ProfilePage> {
     if (a.isNotEmpty && !_isEmailDerivedName(a, email)) {
       return a;
     }
-    // Fallback: use email-derived name if available.
-    if (fallbackName.isNotEmpty) {
-      return fallbackName;
+    // Local cached display name from last successful auth/profile sync.
+    if (l.isNotEmpty && !_isEmailDerivedName(l, email)) {
+      return l;
     }
-    return 'User';
+
+    // Fallback to any non-placeholder auth/local/stored name before giving up.
+    if (a.isNotEmpty && aLower != 'user') {
+      return a;
+    }
+    if (l.isNotEmpty && lLower != 'user') {
+      return l;
+    }
+    if (p.isNotEmpty && pLower != 'user') {
+      return p;
+    }
+
+    return 'Not set';
   }
 
   Future<void> _diagnoseAndHealProfileName({
@@ -178,7 +195,7 @@ class _ProfilePageState extends State<ProfilePage> {
       'profileName="${profileName ?? ''}" '
       'authDisplayName="${authDisplayName ?? ''}" '
       'email="${user.email ?? ''}" '
-      'resolvedName="${resolvedName}"',
+      'resolvedName="$resolvedName"',
     );
 
     final stored = (profileName ?? '').trim();
@@ -188,6 +205,8 @@ class _ProfilePageState extends State<ProfilePage> {
     // Heal if missing, or if existing stored value is email-derived.
     if ((!shouldHealExistingEmailDerived && stored.isNotEmpty) ||
         resolvedName.isEmpty ||
+        resolvedName == 'User' ||
+        resolvedName == 'Not set' ||
         resolvedName == stored) {
       return;
     }
@@ -243,10 +262,12 @@ class _ProfilePageState extends State<ProfilePage> {
       final profileName = (profile?['fullName'] as String?)?.trim();
       final providerDisplayName = await _googleDisplayNameLikeSignup(user);
       final authDisplayName = user.displayName?.trim();
+      final localCachedDisplayName = await _readLocalCachedDisplayName();
       final fullName = _resolveProfileFullName(
         profileName: profileName,
         providerDisplayName: providerDisplayName,
         authDisplayName: authDisplayName,
+        localCachedDisplayName: localCachedDisplayName,
         email: user.email,
       );
       final role = (profile?['role'] as String?)?.trim() ?? 'User';
@@ -262,6 +283,14 @@ class _ProfilePageState extends State<ProfilePage> {
           resolvedName: fullName,
         ),
       );
+
+      // If Firestore has an explicit non-email-derived name, keep auth display name in sync.
+      if (profileName != null &&
+          profileName.isNotEmpty &&
+          !_isEmailDerivedName(profileName, user.email) &&
+          (user.displayName ?? '').trim() != profileName) {
+        unawaited(user.updateDisplayName(profileName));
+      }
 
       setState(() {
         _nameController.text = fullName;
@@ -280,13 +309,14 @@ class _ProfilePageState extends State<ProfilePage> {
           profileName: null,
           providerDisplayName: providerDisplayName,
           authDisplayName: user.displayName,
+          localCachedDisplayName: await _readLocalCachedDisplayName(),
           email: user.email,
         );
         debugPrint(
           'PROFILE_DIAG_FALLBACK uid=${user.uid} '
           'authDisplayName="${user.displayName ?? ''}" '
           'email="${user.email ?? ''}" '
-          'resolvedName="${resolvedName}" '
+          'resolvedName="$resolvedName" '
           'error="$e"',
         );
         setState(() {
@@ -533,12 +563,30 @@ class _ProfilePageState extends State<ProfilePage> {
   String _friendlyStorageErrorMessage(Object error, {required String fallback}) {
     final raw = error.toString().toLowerCase();
     if (raw.contains('storage/object-not-found') || raw.contains('object-not-found')) {
-      return 'The selected image could not be found in storage. Please try uploading again.';
+      return 'Image upload requires Firebase Storage billing to be enabled. Activation is enough; you are not charged unless usage exceeds free limits.';
     }
     if (raw.contains('permission-denied')) {
       return 'You do not have permission to access this image. Please sign in again and retry.';
     }
     return fallback;
+  }
+
+  Future<String?> _readLocalCachedDisplayName() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString('userData');
+      if (raw == null || raw.trim().isEmpty) {
+        return null;
+      }
+      final decoded = jsonDecode(raw);
+      if (decoded is Map<String, dynamic>) {
+        final name = (decoded['displayName'] as String?)?.trim();
+        return (name != null && name.isNotEmpty) ? name : null;
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
   }
 
   void _handleBrokenPhotoUrl() {

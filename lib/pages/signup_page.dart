@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import '../auth_service.dart';
-import '../firebase_service.dart';
 
 class SignupPage extends StatefulWidget {
   const SignupPage({
@@ -31,37 +30,6 @@ class _SignupPageState extends State<SignupPage> {
   bool _emailPrefilledFromGoogle = false;
   bool _namePrefilledFromGoogle = false;
   String? _googlePhotoUrl;
-
-  String _fallbackNameFromEmail(String email) {
-    final rawLocal = email.trim().split('@').first.trim();
-    if (rawLocal.isEmpty) {
-      return '';
-    }
-
-    var unquoted = rawLocal;
-    while (unquoted.startsWith('"') || unquoted.startsWith("'")) {
-      unquoted = unquoted.substring(1).trimLeft();
-    }
-    while (unquoted.endsWith('"') || unquoted.endsWith("'")) {
-      unquoted = unquoted.substring(0, unquoted.length - 1).trimRight();
-    }
-
-    final cleaned = unquoted
-        .replaceAll(RegExp(r'[._-]+'), ' ')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
-
-    if (cleaned.isEmpty) {
-      return '';
-    }
-
-    return cleaned
-        .split(' ')
-        .where((part) => part.isNotEmpty)
-        .map((part) => part[0].toUpperCase() + part.substring(1).toLowerCase())
-        .join(' ')
-        .trim();
-  }
 
   Future<void> _showSignupNotice({
     required String title,
@@ -275,12 +243,10 @@ class _SignupPageState extends State<SignupPage> {
       }
       if (!mounted) return;
       final displayName = (prefill.displayName ?? '').trim();
-      final fallbackName = _fallbackNameFromEmail(prefill.email);
       setState(() {
         _emailController.text = prefill.email;
-        final resolvedName = displayName.isNotEmpty ? displayName : fallbackName;
-        if (resolvedName.isNotEmpty) {
-          _nameController.text = resolvedName;
+        if (displayName.isNotEmpty) {
+          _nameController.text = displayName;
           _namePrefilledFromGoogle = true;
         }
         _googlePhotoUrl = (prefill.photoUrl ?? '').trim().isNotEmpty
