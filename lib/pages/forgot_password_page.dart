@@ -113,7 +113,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
               ),
               const SizedBox(height: 8),
               Text(
-                '1. Enter your email address\n2. Check your inbox for the reset email\n3. Tap "Click here to set new password and recover your account"\n4. Enter and confirm your new password in the reset page',
+                '1. Enter your email address\n2. Check your inbox for the reset email\n3. Open the reset link\n4. Set your new password\n5. Return to sign in',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ],
@@ -160,7 +160,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'Open your inbox and look for the email. Click the "Click here to set new password and recover your account" button to proceed.',
+                  'Open your inbox and look for the reset email, then follow the link to set your new password.',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ],

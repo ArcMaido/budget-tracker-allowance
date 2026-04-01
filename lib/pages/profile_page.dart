@@ -149,36 +149,22 @@ class _ProfilePageState extends State<ProfilePage> {
     final g = (providerDisplayName ?? '').trim();
     final a = (authDisplayName ?? '').trim();
     final l = (localCachedDisplayName ?? '').trim();
-    final pLower = p.toLowerCase();
-    final aLower = a.toLowerCase();
-    final lLower = l.toLowerCase();
+    final pLooksEmailDerived = _isEmailDerivedName(p, email);
+    final gLooksEmailDerived = _isEmailDerivedName(g, email);
+    final aLooksEmailDerived = _isEmailDerivedName(a, email);
+    final lLooksEmailDerived = _isEmailDerivedName(l, email);
 
-    // Use explicit stored name if it is not derived from email local-part.
-    if (p.isNotEmpty && pLower != 'user' && !_isEmailDerivedName(p, email)) {
+    if (p.isNotEmpty && p.toLowerCase() != 'user' && !pLooksEmailDerived) {
       return p;
     }
-    // Prefer Google-provided display name (skipping email-derived sources).
-    if (g.isNotEmpty && !_isEmailDerivedName(g, email)) {
+    if (g.isNotEmpty && g.toLowerCase() != 'user' && !gLooksEmailDerived) {
       return g;
     }
-    // Prefer auth display name (skipping email-derived sources).
-    if (a.isNotEmpty && !_isEmailDerivedName(a, email)) {
+    if (a.isNotEmpty && a.toLowerCase() != 'user' && !aLooksEmailDerived) {
       return a;
     }
-    // Local cached display name from last successful auth/profile sync.
-    if (l.isNotEmpty && !_isEmailDerivedName(l, email)) {
+    if (l.isNotEmpty && l.toLowerCase() != 'user' && !lLooksEmailDerived) {
       return l;
-    }
-
-    // Fallback to any non-placeholder auth/local/stored name before giving up.
-    if (a.isNotEmpty && aLower != 'user') {
-      return a;
-    }
-    if (l.isNotEmpty && lLower != 'user') {
-      return l;
-    }
-    if (p.isNotEmpty && pLower != 'user') {
-      return p;
     }
 
     return 'Not set';
@@ -263,16 +249,50 @@ class _ProfilePageState extends State<ProfilePage> {
       final providerDisplayName = await _googleDisplayNameLikeSignup(user);
       final authDisplayName = user.displayName?.trim();
       final localCachedDisplayName = await _readLocalCachedDisplayName();
-      final fullName = _resolveProfileFullName(
+      var fullName = _resolveProfileFullName(
         profileName: profileName,
         providerDisplayName: providerDisplayName,
         authDisplayName: authDisplayName,
         localCachedDisplayName: localCachedDisplayName,
         email: user.email,
       );
+      if (fullName == 'Not set' && (user.email ?? '').trim().isNotEmpty) {
+        final lastSignupName = await AuthService.readLastSignupFullName(user.email!);
+        if (lastSignupName != null && lastSignupName.isNotEmpty) {
+          fullName = lastSignupName;
+          unawaited(
+            FirebaseService.saveUserProfile(
+              userId: user.uid,
+              userData: {
+                'fullName': fullName,
+                'lastUpdated': DateTime.now(),
+              },
+            ),
+          );
+          unawaited(user.updateDisplayName(fullName));
+        }
+      }
       final role = (profile?['role'] as String?)?.trim() ?? 'User';
-      final photoUrl = (profile?['photoUrl'] as String?)?.trim() ?? 
-          user.photoURL?.trim();
+      String? photoUrl = (profile?['photoUrl'] as String?)?.trim();
+      if (photoUrl == null || photoUrl.isEmpty) {
+        photoUrl = user.photoURL?.trim();
+      }
+      if ((photoUrl == null || photoUrl.isEmpty) && (user.email ?? '').trim().isNotEmpty) {
+        final cachedPhoto = await AuthService.readLastSignupPhotoUrl(user.email!);
+        if (cachedPhoto != null && cachedPhoto.isNotEmpty) {
+          photoUrl = cachedPhoto;
+          unawaited(
+            FirebaseService.saveUserProfile(
+              userId: user.uid,
+              userData: {
+                'photoUrl': cachedPhoto,
+                'lastUpdated': DateTime.now(),
+              },
+            ),
+          );
+          unawaited(user.updatePhotoURL(cachedPhoto));
+        }
+      }
       final coverUrl = (profile?['coverPhotoUrl'] as String?)?.trim();
 
       unawaited(
@@ -691,209 +711,6 @@ class _ProfilePageState extends State<ProfilePage> {
       body: ListView(
         padding: const EdgeInsets.all(12),
         children: [
-          // Profile Header Card
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
-              child: Column(
-                children: [
-                  // Background Image
-                  GestureDetector(
-                    onTap: _isEditing && !_isUploadingCover
-                        ? _pickAndUploadCoverPhoto
-                        : null,
-                    child: Container(
-                      height: 140,
-                      decoration: BoxDecoration(
-                        color: scheme.surfaceContainerHighest,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
-                        child: Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            if (_pendingCoverBytes != null)
-                              Image.memory(
-                                _pendingCoverBytes!,
-                                fit: BoxFit.cover,
-                              )
-                            else if (_coverPhotoUrl != null && _coverPhotoUrl!.isNotEmpty)
-                              Image.network(
-                                _coverPhotoUrl!,
-                                fit: BoxFit.cover,
-                                errorBuilder: (context, error, stackTrace) {
-                                  _handleBrokenCoverUrl();
-                                  return Container(
-                                    color: scheme.surfaceContainerHighest,
-                                    child: Icon(
-                                      Icons.landscape_outlined,
-                                      size: 48,
-                                      color: scheme.onSurfaceVariant,
-                                    ),
-                                  );
-                                },
-                              )
-                            else
-                              Center(
-                                child: Icon(
-                                  Icons.landscape_outlined,
-                                  size: 48,
-                                  color: scheme.onSurfaceVariant,
-                                ),
-                              ),
-                            if (_isEditing)
-                              Positioned(
-                                bottom: 8,
-                                right: 8,
-                                child: CircleAvatar(
-                                  radius: 16,
-                                  backgroundColor: scheme.primary,
-                                  child: _isUploadingCover
-                                      ? const SizedBox(
-                                          width: 16,
-                                          height: 16,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                                          ),
-                                        )
-                                      : const Icon(
-                                          Icons.edit,
-                                          size: 16,
-                                          color: Colors.white,
-                                        ),
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-
-                  // Profile Photo
-                  GestureDetector(
-                    onTap: _isEditing && !_isUploadingPhoto
-                        ? _pickAndUploadProfilePhoto
-                        : null,
-                    child: Stack(
-                      alignment: Alignment.bottomRight,
-                      children: [
-                        Container(
-                          width: 90,
-                          height: 90,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: scheme.primaryContainer,
-                            border: Border.all(
-                              color: scheme.primary,
-                              width: 2,
-                            ),
-                          ),
-                          child: ClipOval(
-                            child: _pendingPhotoBytes != null
-                                ? Image.memory(
-                                    _pendingPhotoBytes!,
-                                    fit: BoxFit.cover,
-                                  )
-                                : (_photoUrl != null && _photoUrl!.isNotEmpty)
-                                    ? Image.network(
-                                        _photoUrl!,
-                                        fit: BoxFit.cover,
-                                        errorBuilder: (context, error, stackTrace) {
-                                          _handleBrokenPhotoUrl();
-                                          return Icon(
-                                            Icons.person,
-                                            size: 40,
-                                            color: scheme.primary,
-                                          );
-                                        },
-                                      )
-                                    : Icon(
-                                        Icons.person,
-                                        size: 40,
-                                        color: scheme.primary,
-                                      ),
-                          ),
-                        ),
-                        if (_isEditing && !_isUploadingPhoto)
-                          Container(
-                            padding: const EdgeInsets.all(6),
-                            decoration: BoxDecoration(
-                              color: scheme.primary,
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                color: Colors.white,
-                                width: 2,
-                              ),
-                            ),
-                            child: const Icon(
-                              Icons.camera_alt_outlined,
-                              color: Colors.white,
-                              size: 16,
-                            ),
-                          )
-                        else if (_isUploadingPhoto)
-                          Container(
-                            padding: const EdgeInsets.all(4),
-                            decoration: BoxDecoration(
-                              color: scheme.primary,
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                color: Colors.white,
-                                width: 2,
-                              ),
-                            ),
-                            child: const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                valueColor: AlwaysStoppedAnimation(
-                                  Colors.white,
-                                ),
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-
-                  // Name and Role
-                  Text(
-                    _nameController.text.isEmpty ? 'User' : _nameController.text,
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    _roleController.text.isEmpty
-                        ? 'Member'
-                        : _roleController.text,
-                    style: TextStyle(
-                      color: scheme.onSurfaceVariant,
-                      fontSize: 14,
-                    ),
-                  ),
-                  if (_isEditing) const SizedBox(height: 12),
-                  if (_isEditing)
-                    Text(
-                      'Tap photo or background to change',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: scheme.onSurfaceVariant,
-                        fontStyle: FontStyle.italic,
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-
           // Edit Form
           if (_isEditing)
             Card(
@@ -953,6 +770,23 @@ class _ProfilePageState extends State<ProfilePage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    Center(
+                      child: CircleAvatar(
+                        radius: 34,
+                        backgroundColor: scheme.primaryContainer,
+                        backgroundImage: (_photoUrl != null && _photoUrl!.isNotEmpty)
+                            ? NetworkImage(_photoUrl!)
+                            : null,
+                        child: (_photoUrl != null && _photoUrl!.isNotEmpty)
+                            ? null
+                            : Icon(
+                                Icons.person_outline,
+                                size: 30,
+                                color: scheme.primary,
+                              ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
                     _buildInfoTile(
                       icon: Icons.person_outline,
                       label: 'Full Name',

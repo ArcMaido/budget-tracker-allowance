@@ -31,6 +31,12 @@ class _SignupPageState extends State<SignupPage> {
   bool _namePrefilledFromGoogle = false;
   String? _googlePhotoUrl;
 
+  bool _looksLikeEmail(String value) {
+    final v = value.trim();
+    if (v.isEmpty) return false;
+    return RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(v);
+  }
+
   Future<void> _showSignupNotice({
     required String title,
     required String message,
@@ -130,6 +136,11 @@ class _SignupPageState extends State<SignupPage> {
       return;
     }
 
+    if (_looksLikeEmail(_nameController.text)) {
+      setState(() => _errorMessage = 'Full name must be your name, not an email address.');
+      return;
+    }
+
     if (_passwordController.text != _confirmPasswordController.text) {
       setState(() => _errorMessage = 'Passwords do not match');
       return;
@@ -155,6 +166,16 @@ class _SignupPageState extends State<SignupPage> {
       final normalizedName = _nameController.text.trim();
       final normalizedEmail = _emailController.text.trim();
       final normalizedPhoto = (_googlePhotoUrl ?? '').trim();
+      await AuthService.cachePendingSignupFullName(
+        email: normalizedEmail,
+        fullName: normalizedName,
+      );
+      if (normalizedPhoto.isNotEmpty) {
+        await AuthService.cachePendingSignupPhotoUrl(
+          email: normalizedEmail,
+          photoUrl: normalizedPhoto,
+        );
+      }
       final credential = await AuthService.signUpWithEmail(
         email: normalizedEmail,
         password: _passwordController.text,
@@ -171,7 +192,7 @@ class _SignupPageState extends State<SignupPage> {
             print('Warning: Could not update auth display name: $e');
           }
         }
-        if ((createdUser.photoURL ?? '').trim().isEmpty && normalizedPhoto.isNotEmpty) {
+        if (normalizedPhoto.isNotEmpty) {
           try {
             await createdUser.updatePhotoURL(normalizedPhoto);
           } catch (e) {
@@ -245,9 +266,12 @@ class _SignupPageState extends State<SignupPage> {
       final displayName = (prefill.displayName ?? '').trim();
       setState(() {
         _emailController.text = prefill.email;
-        if (displayName.isNotEmpty) {
+        if (displayName.isNotEmpty && !_looksLikeEmail(displayName)) {
           _nameController.text = displayName;
           _namePrefilledFromGoogle = true;
+        } else {
+          _nameController.clear();
+          _namePrefilledFromGoogle = false;
         }
         _googlePhotoUrl = (prefill.photoUrl ?? '').trim().isNotEmpty
             ? prefill.photoUrl!.trim()

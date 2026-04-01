@@ -215,3 +215,4 @@ exports.confirmPasswordResetWithOtp = functions.https.onCall(async (request) => 
 
   return { success: true };
 });
+

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
 import '../auth_service.dart';
 import 'forgot_password_page.dart';
 import 'signup_page.dart';
@@ -25,6 +26,13 @@ class _LoginPageState extends State<LoginPage> {
   bool _showPassword = false;
   bool _isLoading = false;
   String _errorMessage = '';
+  int _failedAttempts = 0;
+  int _lockoutSecondsRemaining = 0;
+  Timer? _lockoutTimer;
+  bool _isLockoutDialogVisible = false;
+  final ValueNotifier<int> _countdownNotifier = ValueNotifier<int>(0);
+
+  bool get _isLockedOut => _lockoutSecondsRemaining > 0;
 
   String _friendlyAuthError(Object error, {required bool isGoogle}) {
     final raw = error.toString();
@@ -55,12 +63,118 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   void dispose() {
+    _lockoutTimer?.cancel();
+    _countdownNotifier.dispose();
     _emailController.dispose();
     _passwordController.dispose();
     super.dispose();
   }
 
+  bool _isInvalidCredentialError(Object error) {
+    final raw = error.toString().toLowerCase();
+    return raw.contains('user-not-found') ||
+        raw.contains('wrong-password') ||
+        raw.contains('invalid-credential') ||
+        raw.contains('invalid_login_credentials');
+  }
+
+  void _startLoginLockout() {
+    _lockoutTimer?.cancel();
+    setState(() {
+      _lockoutSecondsRemaining = 10;
+      _errorMessage =
+          'Too many failed attempts. Please wait 10 seconds before trying again.';
+    });
+    _countdownNotifier.value = 10;
+
+    _showSweetAlertLockout();
+    _lockoutTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+
+      if (_lockoutSecondsRemaining <= 1) {
+        timer.cancel();
+        setState(() {
+          _lockoutSecondsRemaining = 0;
+          _failedAttempts = 0;
+          _errorMessage = '';
+        });
+        _countdownNotifier.value = 0;
+        if (_isLockoutDialogVisible && Navigator.of(context, rootNavigator: true).canPop()) {
+          Navigator.of(context, rootNavigator: true).pop();
+        }
+        _isLockoutDialogVisible = false;
+        return;
+      }
+
+      setState(() {
+        _lockoutSecondsRemaining -= 1;
+      });
+      _countdownNotifier.value = _lockoutSecondsRemaining;
+    });
+  }
+
+  Future<void> _showSweetAlertLockout() async {
+    if (_isLockoutDialogVisible || !mounted) return;
+    _isLockoutDialogVisible = true;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        final scheme = Theme.of(dialogContext).colorScheme;
+        return StatefulBuilder(
+          builder: (context, _) {
+            return AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              title: Row(
+                children: [
+                  Icon(Icons.warning_amber_rounded, color: scheme.error),
+                  const SizedBox(width: 8),
+                  const Expanded(child: Text('Login Temporarily Locked')),
+                ],
+              ),
+              content: ValueListenableBuilder<int>(
+                valueListenable: _countdownNotifier,
+                builder: (context, seconds, _) {
+                  return Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Too many failed attempts. Please wait 10 seconds before trying again.',
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        'Try again in $seconds second${seconds == 1 ? '' : 's'}',
+                        style: TextStyle(
+                          color: scheme.primary,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    _isLockoutDialogVisible = false;
+  }
+
   Future<void> _signIn() async {
+    if (_isLockedOut) {
+      if (!_isLockoutDialogVisible) {
+        await _showSweetAlertLockout();
+      }
+      return;
+    }
+
     if (_emailController.text.isEmpty || _passwordController.text.isEmpty) {
       setState(() => _errorMessage = 'Please fill in all fields');
       return;
@@ -76,8 +190,17 @@ class _LoginPageState extends State<LoginPage> {
         email: _emailController.text.trim(),
         password: _passwordController.text,
       );
+      _failedAttempts = 0;
       widget.onSignedIn?.call();
     } catch (e) {
+      final invalidCredentials = _isInvalidCredentialError(e);
+      if (invalidCredentials) {
+        _failedAttempts += 1;
+        if (_failedAttempts >= 3) {
+          _startLoginLockout();
+        }
+      }
+
       setState(() => _errorMessage = _friendlyAuthError(e, isGoogle: false));
     } finally {
       setState(() => _isLoading = false);
@@ -85,7 +208,7 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Future<void> _signInWithGoogle() async {
-    if (_isLoading) return;
+    if (_isLoading || _isLockedOut) return;
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => SignupPage(
@@ -98,7 +221,7 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Future<void> _openForgotPassword() async {
-    if (_isLoading) return;
+    if (_isLoading || _isLockedOut) return;
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => ForgotPasswordPage(
@@ -193,7 +316,7 @@ class _LoginPageState extends State<LoginPage> {
                             ),
                           TextField(
                             controller: _emailController,
-                            enabled: !_isLoading,
+                            enabled: !_isLoading && !_isLockedOut,
                             decoration: const InputDecoration(
                               labelText: 'Email address',
                               prefixIcon: Icon(Icons.email_outlined),
@@ -202,7 +325,7 @@ class _LoginPageState extends State<LoginPage> {
                           const SizedBox(height: 12),
                           TextField(
                             controller: _passwordController,
-                            enabled: !_isLoading,
+                            enabled: !_isLoading && !_isLockedOut,
                             obscureText: !_showPassword,
                             decoration: InputDecoration(
                               labelText: 'Password',
@@ -211,7 +334,7 @@ class _LoginPageState extends State<LoginPage> {
                                 icon: Icon(
                                   _showPassword ? Icons.visibility : Icons.visibility_off,
                                 ),
-                                onPressed: _isLoading
+                                onPressed: _isLoading || _isLockedOut
                                     ? null
                                     : () => setState(() => _showPassword = !_showPassword),
                               ),
@@ -221,24 +344,28 @@ class _LoginPageState extends State<LoginPage> {
                           Align(
                             alignment: Alignment.centerRight,
                             child: TextButton(
-                              onPressed: _isLoading ? null : _openForgotPassword,
+                              onPressed: _isLoading || _isLockedOut ? null : _openForgotPassword,
                               child: const Text('Forgot password?'),
                             ),
                           ),
                           const SizedBox(height: 14),
                           FilledButton(
-                            onPressed: _isLoading ? null : _signIn,
+                            onPressed: _isLoading || _isLockedOut ? null : _signIn,
                             child: _isLoading
                                 ? const SizedBox(
                                     width: 20,
                                     height: 20,
                                     child: CircularProgressIndicator(strokeWidth: 2),
                                   )
-                                : const Text('Sign In'),
+                                : Text(
+                                    _isLockedOut
+                                        ? 'Locked ($_lockoutSecondsRemaining)'
+                                        : 'Sign In',
+                                  ),
                           ),
                           const SizedBox(height: 10),
                           OutlinedButton.icon(
-                            onPressed: _isLoading ? null : _signInWithGoogle,
+                            onPressed: _isLoading || _isLockedOut ? null : _signInWithGoogle,
                             icon: const Icon(Icons.g_mobiledata_rounded, size: 28),
                             label: const Text('Create account with Google'),
                           ),

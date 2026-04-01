@@ -1,5 +1,7 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -23,10 +25,6 @@ class AuthService {
   static final GoogleSignIn _googleSignIn = GoogleSignIn();
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   static const String _forceLoginAfterSignupKey = 'force_login_after_signup';
-  static const String _passwordResetContinueUrl =
-      'https://allowance-budget-tracker.firebaseapp.com/reset-password';
-  static const String _androidPackageName =
-      'com.app.allowance_budget_dashboard';
 
   static bool _isKnownPigeonCastIssue(Object error) {
     final message = error.toString();
@@ -36,43 +34,64 @@ class AuthService {
       message.contains("List<Object?> is not a subtype");
   }
 
-  static String _formatNameFromEmailLocalPart(String email) {
-    final rawLocalPart = email.trim().split('@').first.trim();
-    if (rawLocalPart.isEmpty) {
-      return '';
+  static Future<bool> verifyCurrentUserStillExistsRemotely() async {
+    final user = _auth.currentUser;
+    if (user == null) {
+      return true;
     }
 
-    var localPart = rawLocalPart;
-    while (localPart.startsWith('"') || localPart.startsWith("'")) {
-      localPart = localPart.substring(1).trimLeft();
-    }
-    while (localPart.endsWith('"') || localPart.endsWith("'")) {
-      localPart = localPart.substring(0, localPart.length - 1).trimRight();
-    }
-    if (localPart.isEmpty) {
-      return '';
-    }
+    try {
+      final idToken = await user.getIdToken(true);
+      if (idToken == null || idToken.trim().isEmpty) {
+        return false;
+      }
 
-    final tokens = localPart
-        .replaceAll(RegExp(r'[._-]+'), ' ')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim()
-        .split(' ')
-        .where((part) => part.trim().isNotEmpty)
-        .toList();
+      final apiKey = Firebase.app().options.apiKey;
+      if (apiKey.trim().isEmpty) {
+        return true;
+      }
 
-    if (tokens.isEmpty) {
-      return '';
+      final client = HttpClient();
+      try {
+        final uri = Uri.parse(
+          'https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=$apiKey',
+        );
+        final request = await client.postUrl(uri);
+        request.headers.contentType = ContentType.json;
+        request.write(jsonEncode({'idToken': idToken}));
+        final response = await request.close();
+        final body = await response.transform(utf8.decoder).join();
+
+        if (response.statusCode == 200) {
+          final decoded = jsonDecode(body);
+          if (decoded is Map<String, dynamic>) {
+            final users = decoded['users'];
+            return users is List && users.isNotEmpty;
+          }
+          return false;
+        }
+
+        final decoded = jsonDecode(body);
+        final message = (decoded is Map<String, dynamic>)
+            ? ((decoded['error'] as Map<String, dynamic>?)?['message'] as String? ?? '')
+            : '';
+        if (message.contains('USER_NOT_FOUND') ||
+            message.contains('INVALID_ID_TOKEN') ||
+            message.contains('TOKEN_EXPIRED')) {
+          return false;
+        }
+
+        return true;
+      } finally {
+        client.close(force: true);
+      }
+    } catch (_) {
+      return true;
     }
-
-    return tokens
-        .map((part) => part[0].toUpperCase() + part.substring(1).toLowerCase())
-        .join(' ')
-        .trim();
   }
 
   static String _resolvePreferredName({
-    required String email,
+    required String? email,
     String? displayName,
     String? fallback,
   }) {
@@ -96,10 +115,140 @@ class AuthService {
       return false;
     }
     final local = e.split('@').first.trim();
-    final localSpaced = _formatNameFromEmailLocalPart(e).toLowerCase();
+    final localSpaced = local
+        .replaceAll(RegExp(r'[._-]+'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
     final compact = localSpaced.replaceAll(' ', '');
     final normalized = value.replaceAll(RegExp(r'\s+'), ' ').trim();
     return normalized == local || normalized == localSpaced || normalized == compact;
+  }
+
+  static String _pendingSignupNameKey(String email) =>
+      'pending_signup_full_name_${email.trim().toLowerCase()}';
+  static String _lastSignupNameKey(String email) =>
+      'last_signup_full_name_${email.trim().toLowerCase()}';
+  static String _pendingSignupPhotoKey(String email) =>
+      'pending_signup_photo_${email.trim().toLowerCase()}';
+  static String _lastSignupPhotoKey(String email) =>
+      'last_signup_photo_${email.trim().toLowerCase()}';
+
+  static Future<void> cachePendingSignupFullName({
+    required String email,
+    required String fullName,
+  }) async {
+    final normalizedEmail = email.trim().toLowerCase();
+    final normalizedName = fullName.trim();
+    if (normalizedEmail.isEmpty || normalizedName.isEmpty) {
+      return;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_pendingSignupNameKey(normalizedEmail), normalizedName);
+    await prefs.setString(_lastSignupNameKey(normalizedEmail), normalizedName);
+  }
+
+  static Future<void> cachePendingSignupPhotoUrl({
+    required String email,
+    required String photoUrl,
+  }) async {
+    final normalizedEmail = email.trim().toLowerCase();
+    final normalizedPhoto = photoUrl.trim();
+    if (normalizedEmail.isEmpty || normalizedPhoto.isEmpty) {
+      return;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_pendingSignupPhotoKey(normalizedEmail), normalizedPhoto);
+    await prefs.setString(_lastSignupPhotoKey(normalizedEmail), normalizedPhoto);
+  }
+
+  static Future<String?> _consumePendingSignupFullName(String email) async {
+    final normalizedEmail = email.trim().toLowerCase();
+    if (normalizedEmail.isEmpty) {
+      return null;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    final key = _pendingSignupNameKey(normalizedEmail);
+    final value = prefs.getString(key)?.trim();
+    if (value != null && value.isNotEmpty) {
+      await prefs.remove(key);
+      return value;
+    }
+    return null;
+  }
+
+  static Future<String?> _consumePendingSignupPhotoUrl(String email) async {
+    final normalizedEmail = email.trim().toLowerCase();
+    if (normalizedEmail.isEmpty) {
+      return null;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    final key = _pendingSignupPhotoKey(normalizedEmail);
+    final value = prefs.getString(key)?.trim();
+    if (value != null && value.isNotEmpty) {
+      await prefs.remove(key);
+      return value;
+    }
+    return null;
+  }
+
+  static Future<String?> readLastSignupFullName(String email) async {
+    final normalizedEmail = email.trim().toLowerCase();
+    if (normalizedEmail.isEmpty) {
+      return null;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    final value = prefs.getString(_lastSignupNameKey(normalizedEmail))?.trim();
+    if (value == null || value.isEmpty) {
+      return null;
+    }
+    if (_looksLikeEmailDerivedName(value, normalizedEmail)) {
+      return null;
+    }
+    return value;
+  }
+
+  static Future<String?> readLastSignupPhotoUrl(String email) async {
+    final normalizedEmail = email.trim().toLowerCase();
+    if (normalizedEmail.isEmpty) {
+      return null;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    final value = prefs.getString(_lastSignupPhotoKey(normalizedEmail))?.trim();
+    if (value == null || value.isEmpty) {
+      return null;
+    }
+    return value;
+  }
+
+  static Future<String?> _fetchGooglePhotoFromAccessToken(String? accessToken) async {
+    if (accessToken == null || accessToken.trim().isEmpty) {
+      return null;
+    }
+
+    final client = HttpClient();
+    try {
+      final uri = Uri.parse(
+        'https://www.googleapis.com/oauth2/v2/userinfo?access_token=${Uri.encodeQueryComponent(accessToken)}',
+      );
+      final request = await client.getUrl(uri);
+      final response = await request.close();
+      if (response.statusCode != 200) {
+        return null;
+      }
+      final body = await response.transform(utf8.decoder).join();
+      final decoded = jsonDecode(body);
+      if (decoded is Map<String, dynamic>) {
+        final photo = (decoded['picture'] as String?)?.trim();
+        if (photo != null && photo.isNotEmpty) {
+          return photo;
+        }
+      }
+      return null;
+    } catch (_) {
+      return null;
+    } finally {
+      client.close(force: true);
+    }
   }
 
   static bool _isJustCreatedUser(User user, {int windowSeconds = 120}) {
@@ -235,9 +384,16 @@ class AuthService {
           final profileDoc =
               await _firestore.collection('users').doc(userCredential.user!.uid).get();
           final profile = profileDoc.data();
+          final pendingSignupName = await _consumePendingSignupFullName(email);
+          final pendingSignupPhoto = await _consumePendingSignupPhotoUrl(email);
           final storedName = (profile?['fullName'] as String?)?.trim();
           final storedPhoto = (profile?['photoUrl'] as String?)?.trim();
+          final authPhoto = (userCredential.user!.photoURL ?? '').trim();
           final authName = (userCredential.user!.displayName ?? '').trim();
+          final shouldPreferPendingName =
+            pendingSignupName != null &&
+            pendingSignupName.isNotEmpty &&
+            !_looksLikeEmailDerivedName(pendingSignupName, userCredential.user!.email);
           final shouldPreferAuthName =
               authName.isNotEmpty &&
               !_looksLikeEmailDerivedName(authName, userCredential.user!.email) &&
@@ -248,17 +404,52 @@ class AuthService {
           final remoteIsNewUser = (profile?['isNewUser'] == true) || (profile == null && justCreated);
           final remoteOnboardingDone = profile?['onboardingCompleted'] == true;
 
-          if (shouldPreferAuthName) {
+          if (shouldPreferPendingName) {
+            await _firestore.collection('users').doc(userCredential.user!.uid).set({
+              'fullName': pendingSignupName,
+              'lastUpdated': DateTime.now(),
+            }, SetOptions(merge: true));
+            await userCredential.user!.updateDisplayName(pendingSignupName);
+          } else if (shouldPreferAuthName) {
             await _firestore.collection('users').doc(userCredential.user!.uid).set({
               'fullName': authName,
               'lastUpdated': DateTime.now(),
             }, SetOptions(merge: true));
             await userCredential.user!.updateDisplayName(authName);
-          } else if (storedName != null && storedName.isNotEmpty) {
+          } else if (storedName != null &&
+              storedName.isNotEmpty &&
+              !_looksLikeEmailDerivedName(storedName, userCredential.user!.email)) {
             await userCredential.user!.updateDisplayName(storedName);
           }
           if (storedPhoto != null && storedPhoto.isNotEmpty) {
             await userCredential.user!.updatePhotoURL(storedPhoto);
+          } else if (pendingSignupPhoto != null && pendingSignupPhoto.isNotEmpty) {
+            await _firestore.collection('users').doc(userCredential.user!.uid).set({
+              'photoUrl': pendingSignupPhoto,
+              'lastUpdated': DateTime.now(),
+            }, SetOptions(merge: true));
+            await userCredential.user!.updatePhotoURL(pendingSignupPhoto);
+          } else if (authPhoto.isNotEmpty) {
+            await _firestore.collection('users').doc(userCredential.user!.uid).set({
+              'photoUrl': authPhoto,
+              'lastUpdated': DateTime.now(),
+            }, SetOptions(merge: true));
+          } else {
+            try {
+              final silent = await _googleSignIn.signInSilently();
+              final silentPhoto = (silent?.photoUrl ?? '').trim();
+              final silentEmail = (silent?.email ?? '').trim().toLowerCase();
+              final currentEmail = email.trim().toLowerCase();
+              if (silentPhoto.isNotEmpty && silentEmail == currentEmail) {
+                await _firestore.collection('users').doc(userCredential.user!.uid).set({
+                  'photoUrl': silentPhoto,
+                  'lastUpdated': DateTime.now(),
+                }, SetOptions(merge: true));
+                await userCredential.user!.updatePhotoURL(silentPhoto);
+              }
+            } catch (_) {
+              // best-effort only
+            }
           }
           final prefs = await SharedPreferences.getInstance();
           final isNewUser = remoteIsNewUser && !remoteOnboardingDone;
@@ -336,9 +527,9 @@ class AuthService {
       if (userCredential.user != null) {
         final isNewGoogleUser = userCredential.additionalUserInfo?.isNewUser ?? false;
         final resolvedGoogleName = _resolvePreferredName(
-          email: googleUser.email,
-          displayName: googleUser.displayName,
-          fallback: userCredential.user!.displayName,
+          email: userCredential.user!.email,
+          displayName: userCredential.user!.displayName,
+          fallback: googleUser.displayName,
         );
 
         try {
@@ -389,13 +580,21 @@ class AuthService {
       final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
       if (googleUser == null) return null;
 
+      String? resolvedPhoto = (googleUser.photoUrl ?? '').trim();
+      if (resolvedPhoto == null || resolvedPhoto.isEmpty) {
+        final auth = await googleUser.authentication;
+        resolvedPhoto = await _fetchGooglePhotoFromAccessToken(auth.accessToken);
+      }
+      if (resolvedPhoto != null && resolvedPhoto.isEmpty) {
+        resolvedPhoto = null;
+      }
+
       final prefill = GoogleSignupPrefill(
         email: googleUser.email,
-        displayName: _resolvePreferredName(
-          email: googleUser.email,
-          displayName: googleUser.displayName,
-        ),
-        photoUrl: googleUser.photoUrl,
+        displayName: (googleUser.displayName ?? '').trim().isNotEmpty
+            ? googleUser.displayName!.trim()
+            : null,
+        photoUrl: resolvedPhoto,
       );
 
       // Keep this flow as email prefill only, not an active Google-auth session.
@@ -591,13 +790,28 @@ class AuthService {
       final existingName = (existing.data()?['fullName'] as String?)?.trim() ?? '';
       final candidateFromInput = fullName.trim();
       final candidateFromAuth = (user.displayName ?? '').trim();
-      final resolvedName = candidateFromInput.isNotEmpty
-          ? candidateFromInput
-          : (existingName.isNotEmpty
-              ? existingName
-            : (candidateFromAuth.isNotEmpty
-              ? candidateFromAuth
-              : 'User'));
+      final inputLooksEmail =
+          _looksLikeEmailDerivedName(candidateFromInput, normalizedEmail);
+      final authLooksEmail =
+          _looksLikeEmailDerivedName(candidateFromAuth, normalizedEmail);
+      final existingLooksEmail =
+          _looksLikeEmailDerivedName(existingName, normalizedEmail);
+
+      String resolvedName = 'User';
+      if (candidateFromInput.isNotEmpty && !inputLooksEmail) {
+        resolvedName = candidateFromInput;
+      } else if (candidateFromAuth.isNotEmpty && !authLooksEmail) {
+        resolvedName = candidateFromAuth;
+      } else if (existingName.isNotEmpty && !existingLooksEmail) {
+        resolvedName = existingName;
+      } else if (candidateFromInput.isNotEmpty) {
+        resolvedName = candidateFromInput;
+      } else if (candidateFromAuth.isNotEmpty) {
+        resolvedName = candidateFromAuth;
+      } else if (existingName.isNotEmpty) {
+        resolvedName = existingName;
+      }
+
       await _firestore.collection('users').doc(user.uid).set(
         {
           'uid': user.uid,
@@ -655,58 +869,9 @@ class AuthService {
   // Reset password
   static Future<void> resetPassword({required String email}) async {
     try {
-      final settings = ActionCodeSettings(
-        url: _passwordResetContinueUrl,
-        handleCodeInApp: true,
-        androidPackageName: _androidPackageName,
-        androidInstallApp: true,
-      );
-
-      try {
-        await _auth.sendPasswordResetEmail(
-          email: email,
-          actionCodeSettings: settings,
-        );
-      } on FirebaseAuthException catch (e) {
-        // Fallback to default Firebase link when continue URL / app links are
-        // not fully configured yet in Firebase Console.
-        final isContinueUrlConfigIssue =
-            e.code == 'invalid-continue-uri' ||
-            e.code == 'unauthorized-continue-uri' ||
-            e.code == 'missing-android-pkg-name';
-        if (!isContinueUrlConfigIssue) {
-          rethrow;
-        }
-        await _auth.sendPasswordResetEmail(email: email);
-      }
+      await _auth.sendPasswordResetEmail(email: email.trim());
     } catch (e) {
       print('Password reset error: $e');
-      rethrow;
-    }
-  }
-
-  // Validate a password reset code sent by Firebase email action.
-  static Future<void> verifyPasswordResetCode({required String code}) async {
-    try {
-      await _auth.checkActionCode(code);
-    } catch (e) {
-      print('Reset code verification error: $e');
-      rethrow;
-    }
-  }
-
-  // Confirm password reset with the code and new password.
-  static Future<void> confirmPasswordResetWithCode({
-    required String code,
-    required String newPassword,
-  }) async {
-    try {
-      await _auth.confirmPasswordReset(
-        code: code,
-        newPassword: newPassword,
-      );
-    } catch (e) {
-      print('Confirm password reset error: $e');
       rethrow;
     }
   }
