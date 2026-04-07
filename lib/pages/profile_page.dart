@@ -1,11 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../firebase_service.dart';
@@ -21,21 +19,13 @@ class ProfilePage extends StatefulWidget {
 class _ProfilePageState extends State<ProfilePage> {
   final _nameController = TextEditingController();
   final _roleController = TextEditingController();
-  final _picker = ImagePicker();
   final _googleSignIn = GoogleSignIn();
 
-  String? _photoUrl;
   String? _coverPhotoUrl;
-  Uint8List? _pendingPhotoBytes;
-  Uint8List? _pendingCoverBytes;
 
   bool _isLoading = true;
   bool _isEditing = false;
   bool _isSaving = false;
-  bool _isUploadingPhoto = false;
-  bool _isUploadingCover = false;
-  bool _isClearingBrokenPhoto = false;
-  bool _isClearingBrokenCover = false;
 
   String _signupStyleEmailFallback(String? email) {
     final e = (email ?? '').trim();
@@ -87,7 +77,8 @@ class _ProfilePageState extends State<ProfilePage> {
       return false;
     }
 
-    final normalizedValue = v.toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim();
+    final normalizedValue =
+        v.toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim();
     if (normalizedValue.contains('@')) {
       return true;
     }
@@ -257,7 +248,8 @@ class _ProfilePageState extends State<ProfilePage> {
         email: user.email,
       );
       if (fullName == 'Not set' && (user.email ?? '').trim().isNotEmpty) {
-        final lastSignupName = await AuthService.readLastSignupFullName(user.email!);
+        final lastSignupName =
+            await AuthService.readLastSignupFullName(user.email!);
         if (lastSignupName != null && lastSignupName.isNotEmpty) {
           fullName = lastSignupName;
           unawaited(
@@ -273,26 +265,6 @@ class _ProfilePageState extends State<ProfilePage> {
         }
       }
       final role = (profile?['role'] as String?)?.trim() ?? 'User';
-      String? photoUrl = (profile?['photoUrl'] as String?)?.trim();
-      if (photoUrl == null || photoUrl.isEmpty) {
-        photoUrl = user.photoURL?.trim();
-      }
-      if ((photoUrl == null || photoUrl.isEmpty) && (user.email ?? '').trim().isNotEmpty) {
-        final cachedPhoto = await AuthService.readLastSignupPhotoUrl(user.email!);
-        if (cachedPhoto != null && cachedPhoto.isNotEmpty) {
-          photoUrl = cachedPhoto;
-          unawaited(
-            FirebaseService.saveUserProfile(
-              userId: user.uid,
-              userData: {
-                'photoUrl': cachedPhoto,
-                'lastUpdated': DateTime.now(),
-              },
-            ),
-          );
-          unawaited(user.updatePhotoURL(cachedPhoto));
-        }
-      }
       final coverUrl = (profile?['coverPhotoUrl'] as String?)?.trim();
 
       unawaited(
@@ -315,10 +287,7 @@ class _ProfilePageState extends State<ProfilePage> {
       setState(() {
         _nameController.text = fullName;
         _roleController.text = role;
-        _photoUrl = photoUrl;
         _coverPhotoUrl = coverUrl;
-        _isClearingBrokenPhoto = false;
-        _isClearingBrokenCover = false;
         _isLoading = false;
       });
     } catch (e) {
@@ -342,163 +311,10 @@ class _ProfilePageState extends State<ProfilePage> {
         setState(() {
           _nameController.text = resolvedName;
           _roleController.text = 'User';
-          _photoUrl = user.photoURL?.trim();
           _coverPhotoUrl = null;
           _isLoading = false;
         });
       }
-    }
-  }
-
-  Future<void> _pickAndUploadProfilePhoto() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-
-    try {
-      final picked = await _picker.pickImage(
-        source: ImageSource.gallery,
-        imageQuality: 70,
-        maxWidth: 1024,
-        maxHeight: 1024,
-      );
-
-      if (picked == null) return;
-
-      final bytes = await picked.readAsBytes();
-      if (!mounted) return;
-
-      setState(() {
-        _pendingPhotoBytes = bytes;
-        _isUploadingPhoto = true;
-      });
-
-      // Upload to Firebase
-      try {
-        final url = await FirebaseService.uploadProfileImageBytes(
-          userId: user.uid,
-          bytes: bytes,
-        ).timeout(const Duration(seconds: 15));
-
-        if (!mounted) return;
-
-        if (url != null && url.isNotEmpty) {
-          // Update local state immediately
-          setState(() {
-            _photoUrl = url;
-            _pendingPhotoBytes = null;
-            _isUploadingPhoto = false;
-            _isClearingBrokenPhoto = false;
-          });
-
-          // Sync to Firebase in background
-          _syncProfileChanges(photoUrl: url);
-
-          _showMessage('Profile photo updated!', isSuccess: true);
-        } else {
-          // Upload returned empty
-          if (mounted) {
-            setState(() {
-              _pendingPhotoBytes = null;
-              _isUploadingPhoto = false;
-            });
-          }
-          _showMessage('Upload failed. Please try again.');
-        }
-      } on TimeoutException {
-        if (mounted) {
-          setState(() {
-            _pendingPhotoBytes = null;
-            _isUploadingPhoto = false;
-          });
-        }
-        _showMessage('Upload took too long. Please try again.');
-      } catch (e) {
-        if (mounted) {
-          setState(() {
-            _pendingPhotoBytes = null;
-            _isUploadingPhoto = false;
-          });
-        }
-        _showMessage(_friendlyStorageErrorMessage(e, fallback: 'Photo upload failed.'));
-      }
-    } catch (e) {
-      _showMessage(_friendlyStorageErrorMessage(e, fallback: 'Unable to pick photo.'));
-    }
-  }
-
-  Future<void> _pickAndUploadCoverPhoto() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-
-    try {
-      final picked = await _picker.pickImage(
-        source: ImageSource.gallery,
-        imageQuality: 75,
-        maxWidth: 1600,
-        maxHeight: 1600,
-      );
-
-      if (picked == null) return;
-
-      final bytes = await picked.readAsBytes();
-      if (!mounted) return;
-
-      setState(() {
-        _pendingCoverBytes = bytes;
-        _isUploadingCover = true;
-      });
-
-      // Upload to Firebase
-      try {
-        final url = await FirebaseService.uploadCoverImageBytes(
-          userId: user.uid,
-          bytes: bytes,
-        ).timeout(const Duration(seconds: 15));
-
-        if (!mounted) return;
-
-        if (url != null && url.isNotEmpty) {
-          // Update local state immediately
-          setState(() {
-            _coverPhotoUrl = url;
-            _pendingCoverBytes = null;
-            _isUploadingCover = false;
-            _isClearingBrokenCover = false;
-          });
-
-          // Sync to Firebase in background
-          _syncProfileChanges(coverUrl: url);
-
-          _showMessage('Background photo updated!', isSuccess: true);
-        } else {
-          // Upload returned empty
-          if (mounted) {
-            setState(() {
-              _pendingCoverBytes = null;
-              _isUploadingCover = false;
-            });
-          }
-          _showMessage('Upload failed. Please try again.');
-        }
-      } on TimeoutException {
-        if (mounted) {
-          setState(() {
-            _pendingCoverBytes = null;
-            _isUploadingCover = false;
-          });
-        }
-        _showMessage('Upload took too long. Please try again.');
-      } catch (e) {
-        if (mounted) {
-          setState(() {
-            _pendingCoverBytes = null;
-            _isUploadingCover = false;
-          });
-        }
-        _showMessage(_friendlyStorageErrorMessage(e, fallback: 'Background upload failed.'));
-      }
-    } catch (e) {
-      _showMessage(_friendlyStorageErrorMessage(e, fallback: 'Unable to pick background image.'));
     }
   }
 
@@ -517,14 +333,9 @@ class _ProfilePageState extends State<ProfilePage> {
     setState(() => _isSaving = true);
 
     try {
-      final resolvedPhotoUrl = (_photoUrl != null && _photoUrl!.trim().isNotEmpty)
-          ? _photoUrl!.trim()
-          : user.photoURL?.trim();
-
       // Update auth profile
       await AuthService.updateUserProfile(
         fullName: name,
-        photoUrl: resolvedPhotoUrl,
       ).timeout(const Duration(seconds: 8));
 
       // Save to Firestore
@@ -533,8 +344,6 @@ class _ProfilePageState extends State<ProfilePage> {
         userData: {
           'fullName': name,
           'role': role,
-          if (resolvedPhotoUrl != null && resolvedPhotoUrl.isNotEmpty)
-            'photoUrl': resolvedPhotoUrl,
           if (_coverPhotoUrl != null && _coverPhotoUrl!.isNotEmpty)
             'coverPhotoUrl': _coverPhotoUrl,
           'lastUpdated': DateTime.now(),
@@ -546,7 +355,6 @@ class _ProfilePageState extends State<ProfilePage> {
       setState(() {
         _isEditing = false;
         _isSaving = false;
-        _photoUrl = resolvedPhotoUrl;
       });
 
       await _showSaveSuccessDialog();
@@ -555,40 +363,6 @@ class _ProfilePageState extends State<ProfilePage> {
       setState(() => _isSaving = false);
       _showMessage('Failed to save profile: ${e.toString()}');
     }
-  }
-
-  Future<void> _syncProfileChanges({
-    String? photoUrl,
-    String? coverUrl,
-  }) async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-
-    try {
-      // Update in background without blocking UI
-      await FirebaseService.saveUserProfile(
-        userId: user.uid,
-        userData: {
-          if (photoUrl != null) 'photoUrl': photoUrl,
-          if (coverUrl != null) 'coverPhotoUrl': coverUrl,
-          'lastUpdated': DateTime.now(),
-        },
-      ).timeout(const Duration(seconds: 5));
-    } catch (e) {
-      // Silent fail for background sync
-      print('Background sync failed: $e');
-    }
-  }
-
-  String _friendlyStorageErrorMessage(Object error, {required String fallback}) {
-    final raw = error.toString().toLowerCase();
-    if (raw.contains('storage/object-not-found') || raw.contains('object-not-found')) {
-      return 'Image upload requires Firebase Storage billing to be enabled. Activation is enough; you are not charged unless usage exceeds free limits.';
-    }
-    if (raw.contains('permission-denied')) {
-      return 'You do not have permission to access this image. Please sign in again and retry.';
-    }
-    return fallback;
   }
 
   Future<String?> _readLocalCachedDisplayName() async {
@@ -607,37 +381,6 @@ class _ProfilePageState extends State<ProfilePage> {
     } catch (_) {
       return null;
     }
-  }
-
-  void _handleBrokenPhotoUrl() {
-    if (_isClearingBrokenPhoto || _photoUrl == null || _photoUrl!.isEmpty) {
-      return;
-    }
-    final fallbackPhoto = FirebaseAuth.instance.currentUser?.photoURL?.trim();
-    _isClearingBrokenPhoto = true;
-    if (mounted) {
-      setState(() {
-        _photoUrl = (fallbackPhoto != null && fallbackPhoto.isNotEmpty)
-            ? fallbackPhoto
-            : null;
-      });
-    }
-    if (fallbackPhoto != null && fallbackPhoto.isNotEmpty) {
-      _syncProfileChanges(photoUrl: fallbackPhoto);
-    }
-  }
-
-  void _handleBrokenCoverUrl() {
-    if (_isClearingBrokenCover || _coverPhotoUrl == null || _coverPhotoUrl!.isEmpty) {
-      return;
-    }
-    _isClearingBrokenCover = true;
-    if (mounted) {
-      setState(() {
-        _coverPhotoUrl = null;
-      });
-    }
-    _syncProfileChanges(coverUrl: '');
   }
 
   void _showMessage(String message, {bool isSuccess = false}) {
@@ -680,7 +423,6 @@ class _ProfilePageState extends State<ProfilePage> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     final user = FirebaseAuth.instance.currentUser;
 
     if (_isLoading) {
@@ -696,7 +438,7 @@ class _ProfilePageState extends State<ProfilePage> {
         actions: [
           IconButton(
             icon: Icon(_isEditing ? Icons.close : Icons.edit_outlined),
-            onPressed: (_isSaving || _isUploadingPhoto || _isUploadingCover)
+            onPressed: _isSaving
                 ? null
                 : () {
                     if (_isEditing) {
@@ -735,7 +477,8 @@ class _ProfilePageState extends State<ProfilePage> {
                     ),
                     const SizedBox(height: 12),
                     TextField(
-                      controller: TextEditingController(text: user?.email ?? ''),
+                      controller:
+                          TextEditingController(text: user?.email ?? ''),
                       enabled: false,
                       decoration: const InputDecoration(
                         labelText: 'Email (Read-only)',
@@ -770,23 +513,13 @@ class _ProfilePageState extends State<ProfilePage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Center(
-                      child: CircleAvatar(
-                        radius: 34,
-                        backgroundColor: scheme.primaryContainer,
-                        backgroundImage: (_photoUrl != null && _photoUrl!.isNotEmpty)
-                            ? NetworkImage(_photoUrl!)
-                            : null,
-                        child: (_photoUrl != null && _photoUrl!.isNotEmpty)
-                            ? null
-                            : Icon(
-                                Icons.person_outline,
-                                size: 30,
-                                color: scheme.primary,
-                              ),
-                      ),
+                    Text(
+                      'Profile Details',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
                     ),
-                    const SizedBox(height: 14),
+                    const SizedBox(height: 10),
                     _buildInfoTile(
                       icon: Icons.person_outline,
                       label: 'Full Name',

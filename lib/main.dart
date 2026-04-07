@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:country_flags/country_flags.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -12,12 +13,17 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'app_styles.dart';
 import 'auth_service.dart';
 import 'data_service.dart';
-import 'firebase_service.dart';
 import 'firebase_options.dart';
 import 'pages/login_page.dart';
 import 'pages/started_page.dart';
 import 'pages/onboarding_page.dart';
 import 'pages/profile_page.dart';
+
+part 'pages/dashboard_about_page.dart';
+part 'pages/dashboard_categories_page.dart';
+part 'pages/dashboard_expenses_page.dart';
+part 'pages/dashboard_history_page.dart';
+part 'pages/dashboard_monthly_page.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -199,18 +205,25 @@ class UserAuthWrapper extends StatefulWidget {
   State<UserAuthWrapper> createState() => _UserAuthWrapperState();
 }
 
-class _UserAuthWrapperState extends State<UserAuthWrapper> {
+class _UserAuthWrapperState extends State<UserAuthWrapper>
+    with WidgetsBindingObserver {
   bool _showOnboarding = false;
   bool _isLoading = true;
   StreamSubscription<User?>? _authSub;
+  Timer? _accountHealthTimer;
+  bool _accountDeletedDialogOpen = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _authSub = FirebaseAuth.instance.authStateChanges().listen((_) {
       if (mounted) {
         setState(() => _isLoading = true);
       }
+      _checkOnboardingStatus();
+    });
+    _accountHealthTimer = Timer.periodic(const Duration(seconds: 8), (_) {
       _checkOnboardingStatus();
     });
     _checkOnboardingStatus();
@@ -218,14 +231,31 @@ class _UserAuthWrapperState extends State<UserAuthWrapper> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _authSub?.cancel();
+    _accountHealthTimer?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _checkOnboardingStatus();
+    }
   }
 
   Future<void> _checkOnboardingStatus() async {
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user != null) {
+        final accountDeleted = await _handleDeletedAccountIfNeeded(user);
+        if (accountDeleted) {
+          if (mounted) {
+            setState(() => _isLoading = false);
+          }
+          return;
+        }
+
         // Retry with increased delays to allow Firestore replication to complete.
         // This ensures that on first login after signup, we properly detect the new user status.
         var isNewUser = false;
@@ -233,7 +263,14 @@ class _UserAuthWrapperState extends State<UserAuthWrapper> {
           if (attempt > 0) {
             await Future.delayed(const Duration(milliseconds: 500));
           }
-          isNewUser = await AuthService.isNewUser();
+          isNewUser = await AuthService.isNewUser().timeout(
+            const Duration(seconds: 4),
+            onTimeout: () {
+              debugPrint(
+                  'Onboarding check attempt $attempt timed out; using fallback=false');
+              return false;
+            },
+          );
           debugPrint('Onboarding check attempt $attempt: isNewUser=$isNewUser');
           if (isNewUser) {
             break;
@@ -261,6 +298,90 @@ class _UserAuthWrapperState extends State<UserAuthWrapper> {
   void _completeOnboarding() {
     AuthService.completeOnboarding();
     setState(() => _showOnboarding = false);
+  }
+
+  Future<bool> _handleDeletedAccountIfNeeded(User user) async {
+    try {
+      final existsRemotely =
+          await AuthService.verifyCurrentUserStillExistsRemotely();
+      if (!existsRemotely) {
+        await _showDeletedAccountDialog();
+        return true;
+      }
+
+      await user.getIdToken(true);
+      await user.reload();
+
+      final refreshed = FirebaseAuth.instance.currentUser;
+      if (refreshed == null) {
+        await _showDeletedAccountDialog();
+        return true;
+      }
+
+      final email = (refreshed.email ?? '').trim();
+      if (email.isNotEmpty) {
+        final methods =
+            await FirebaseAuth.instance.fetchSignInMethodsForEmail(email);
+        if (methods.isEmpty) {
+          await _showDeletedAccountDialog();
+          return true;
+        }
+      }
+
+      final profileDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(refreshed.uid)
+          .get();
+      if (!profileDoc.exists) {
+        await _showDeletedAccountDialog();
+        return true;
+      }
+
+      return false;
+    } on FirebaseAuthException catch (e) {
+      final isDeleted = e.code == 'user-not-found' ||
+          e.code == 'user-token-expired' ||
+          e.code == 'invalid-user-token' ||
+          e.code == 'invalid-credential';
+      if (!isDeleted) {
+        return false;
+      }
+      await _showDeletedAccountDialog();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _showDeletedAccountDialog() async {
+    if (!mounted || _accountDeletedDialogOpen) {
+      return;
+    }
+    _accountDeletedDialogOpen = true;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Account Deleted'),
+          content: const Text(
+            'This account was deleted from Firebase. Please log in again or create a new account.',
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () async {
+                await AuthService.signOut();
+                if (dialogContext.mounted) {
+                  Navigator.of(dialogContext).pop();
+                }
+              },
+              child: const Text('Go to Login'),
+            ),
+          ],
+        );
+      },
+    );
+    _accountDeletedDialogOpen = false;
   }
 
   @override
@@ -354,6 +475,8 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
   final _searchController = TextEditingController();
 
   String _expenseCategory = 'Food';
+  DateTime _allowanceMonth =
+      DateTime(DateTime.now().year, DateTime.now().month, 1);
   DateTime _expenseDate = DateTime.now();
   String _filterCategory = 'all';
   String _filterMonth = 'all';
@@ -374,7 +497,6 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
   bool _isEditingAllowance = false;
   int _selectedNavIndex = 0;
   String _currencyCode = 'PHP';
-  String? _profilePhotoUrl;
 
   static const List<String> _navLabels = [
     'Overview',
@@ -413,7 +535,7 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
   void initState() {
     super.initState();
     _load();
-    _loadProfilePreview();
+    // _loadProfilePreview();
     _searchController.addListener(() => setState(() {}));
   }
 
@@ -441,9 +563,16 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
       }
 
       setState(() {
-        _data = raw == null ? BudgetData.defaultState() : BudgetData.fromJson(raw);
+        _data =
+            raw == null ? BudgetData.defaultState() : BudgetData.fromJson(raw);
+        if (_data.monthAllowances.isEmpty && _data.monthlyAllowance > 0) {
+          // Backward compatibility: migrate legacy single allowance to current month only.
+          _data.monthAllowances[_nowMonthKey()] = _data.monthlyAllowance;
+        }
         _syncCategoryLineColors();
-        _allowanceController.text = _data.monthlyAllowance.toStringAsFixed(0);
+        _allowanceController.text =
+            _allowanceForMonthKey(_monthKey(_allowanceMonth))
+                .toStringAsFixed(0);
         _expenseCategory = _data.categories.keys.isNotEmpty
             ? _data.categories.keys.first
             : 'General';
@@ -454,29 +583,6 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
       });
     } catch (e) {
       setState(() => _loading = false);
-    }
-  }
-
-  Future<void> _loadProfilePreview() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) {
-      if (mounted) {
-        setState(() => _profilePhotoUrl = null);
-      }
-      return;
-    }
-
-    try {
-      final profile = await FirebaseService.getUserProfile(user.uid)
-          .timeout(const Duration(seconds: 20), onTimeout: () => null);
-      final fromFirestore = (profile?['photoUrl'] as String?)?.trim();
-      final nextPhoto =
-          (fromFirestore != null && fromFirestore.isNotEmpty) ? fromFirestore : user.photoURL;
-      if (!mounted) return;
-      setState(() => _profilePhotoUrl = nextPhoto);
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => _profilePhotoUrl = user.photoURL);
     }
   }
 
@@ -562,7 +668,9 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
             budget: category.value,
           );
         }
-        await DataService.setMonthlyAllowance(_data.monthlyAllowance);
+        await DataService.setMonthlyAllowance(
+          _allowanceForMonthKey(_nowMonthKey()),
+        );
         debugPrint('[Save] Firebase sync completed');
       } else {
         debugPrint('[Save] No user logged in, skipping Firebase sync');
@@ -583,7 +691,8 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
 
   String _money(num value) {
     final symbol = _currencySymbols[_currencyCode] ?? 'PHP ';
-    return NumberFormat.currency(symbol: symbol, decimalDigits: 0).format(value);
+    return NumberFormat.currency(symbol: symbol, decimalDigits: 0)
+        .format(value);
   }
 
   String _monthKey(DateTime dt) => DateFormat('yyyy-MM').format(dt);
@@ -599,6 +708,44 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
   }
 
   String _nowMonthKey() => _monthKey(DateTime.now());
+
+  double _allowanceForMonthKey(String monthKey) {
+    final fromMap = _data.monthAllowances[monthKey];
+    if (fromMap != null && fromMap > 0) {
+      return fromMap;
+    }
+
+    // Legacy fallback: only treat old global value as current-month allowance.
+    if (monthKey == _nowMonthKey() && _data.monthlyAllowance > 0) {
+      return _data.monthlyAllowance;
+    }
+
+    return 0;
+  }
+
+  Future<void> _pickAllowanceMonth() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _allowanceMonth,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2100),
+      initialDatePickerMode: DatePickerMode.year,
+    );
+    if (picked == null) {
+      return;
+    }
+
+    final monthStart = DateTime(picked.year, picked.month, 1);
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _allowanceMonth = monthStart;
+      _allowanceController.text =
+          _allowanceForMonthKey(_monthKey(monthStart)).toStringAsFixed(0);
+      _isEditingAllowance = true;
+    });
+  }
 
   List<ExpenseTx> _currentMonthTransactions() {
     final key = _nowMonthKey();
@@ -616,7 +763,8 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
   }
 
   List<String> _uniqueMonths() {
-    final months = _data.transactions.map((tx) => _monthKey(tx.date)).toSet().toList();
+    final months =
+        _data.transactions.map((tx) => _monthKey(tx.date)).toSet().toList();
     months.sort((a, b) => b.compareTo(a));
     return months;
   }
@@ -632,7 +780,8 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
 
   List<_PeriodSummaryRow> _buildPeriodSummaryRows() {
     final years = _availableYears();
-    final selectedYear = years.contains(_summaryYear) ? _summaryYear : years.first;
+    final selectedYear =
+        years.contains(_summaryYear) ? _summaryYear : years.first;
 
     if (_summaryPeriod == 'year') {
       return years.map((year) {
@@ -641,8 +790,12 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
         final spent = _data.transactions
             .where((tx) => !tx.date.isBefore(start) && tx.date.isBefore(end))
             .fold<double>(0, (sum, tx) => sum + tx.amount);
-        final allowance = _data.monthlyAllowance * 12;
-        return _PeriodSummaryRow(label: '$year', allowance: allowance, spent: spent);
+        final allowance = List<int>.generate(12, (idx) => idx + 1)
+            .map((month) =>
+                _allowanceForMonthKey(_monthKey(DateTime(year, month, 1))))
+            .fold<double>(0, (sum, value) => sum + value);
+        return _PeriodSummaryRow(
+            label: '$year', allowance: allowance, spent: spent);
       }).toList();
     }
 
@@ -650,7 +803,9 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
       final daysInMonth = DateTime(selectedYear, _summaryMonth + 1, 0).day;
       final startDaySeed = _summaryStartDay.clamp(1, daysInMonth);
       final rows = <_PeriodSummaryRow>[];
-      for (var startDay = startDaySeed, i = 1; startDay <= daysInMonth; startDay += 7, i++) {
+      for (var startDay = startDaySeed, i = 1;
+          startDay <= daysInMonth;
+          startDay += 7, i++) {
         final endDay = math.min(startDay + 6, daysInMonth);
         final start = DateTime(selectedYear, _summaryMonth, startDay);
         final end = DateTime(selectedYear, _summaryMonth, endDay + 1);
@@ -658,10 +813,13 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
             .where((tx) => !tx.date.isBefore(start) && tx.date.isBefore(end))
             .fold<double>(0, (sum, tx) => sum + tx.amount);
         final ratio = (endDay - startDay + 1) / daysInMonth;
-        final allowance = _data.monthlyAllowance * ratio;
+        final monthAllowance = _allowanceForMonthKey(
+            _monthKey(DateTime(selectedYear, _summaryMonth, 1)));
+        final allowance = monthAllowance * ratio;
         rows.add(
           _PeriodSummaryRow(
-            label: 'Week $i (${DateFormat('MMM d').format(start)} - ${DateFormat('d').format(DateTime(selectedYear, _summaryMonth, endDay))})',
+            label:
+                'Week $i (${DateFormat('MMM d').format(start)} - ${DateFormat('d').format(DateTime(selectedYear, _summaryMonth, endDay))})',
             allowance: allowance,
             spent: spent,
           ),
@@ -679,7 +837,7 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
           .fold<double>(0, (sum, tx) => sum + tx.amount);
       return _PeriodSummaryRow(
         label: DateFormat('MMM yyyy').format(start),
-        allowance: _data.monthlyAllowance,
+        allowance: _allowanceForMonthKey(_monthKey(start)),
         spent: spent,
       );
     });
@@ -736,18 +894,27 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
       _showHint('Enter a valid monthly allowance greater than 0.');
       return false;
     }
-    
+    final selectedMonthKey = _monthKey(_allowanceMonth);
+    final isCurrentMonth = selectedMonthKey == _nowMonthKey();
+
     try {
-      setState(() => _data.monthlyAllowance = next);
+      setState(() {
+        _data.monthAllowances[selectedMonthKey] = next;
+        if (isCurrentMonth) {
+          _data.monthlyAllowance = next;
+        }
+      });
       await _save();
-      
+      await DataService.setMonthlyAllowance(next);
+
       if (!mounted) {
         return true;
       }
-      
+
       await _showSuccessAlert(
         title: 'Monthly Allowance Set',
-        message: 'Your monthly allowance has been set successfully.',
+        message:
+            'Allowance for ${DateFormat('MMM yyyy').format(_allowanceMonth)} has been set successfully.',
       );
       return true;
     } catch (e) {
@@ -804,13 +971,13 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
           _expenseCategory = name;
         }
       });
-      
+
       await _save();
-      
+
       if (!mounted) {
         return;
       }
-      
+
       await _showSuccessAlert(
         title: existed ? 'Category Updated' : 'Category Added',
         message: existed
@@ -859,6 +1026,10 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
 
   void _showHint(String text) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  }
+
+  void _runState(VoidCallback action) {
+    setState(action);
   }
 
   Future<void> _showSuccessAlert({
@@ -915,15 +1086,6 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
     }
   }
 
-  Future<void> _openProfilePage() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => const ProfilePage(),
-      ),
-    );
-    await _loadProfilePreview();
-  }
-
   void _openSettingsPage() {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -951,25 +1113,21 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
     );
   }
 
+  void _openProfilePage() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => const ProfilePage(),
+      ),
+    );
+  }
+
   Widget _buildProfileButton() {
-    final hasPhoto = _profilePhotoUrl != null && _profilePhotoUrl!.isNotEmpty;
     return IconButton(
       onPressed: _openProfilePage,
-      icon: CircleAvatar(
-        radius: 14,
-        backgroundColor: Colors.white.withOpacity(0.2),
-        backgroundImage: hasPhoto ? NetworkImage(_profilePhotoUrl!) : null,
-        child: hasPhoto
-            ? null
-            : const Icon(
-                Icons.person_outline,
-                size: 18,
-                color: Colors.white,
-              ),
-      ),
+      icon: const Icon(Icons.person_outline),
       style: IconButton.styleFrom(
-        backgroundColor: const Color(0xFF1A7A59),
-        foregroundColor: Colors.white,
+        backgroundColor: const Color(0xFFE2EFE8),
+        foregroundColor: const Color(0xFF1A7A59),
       ),
       tooltip: 'Profile',
     );
@@ -1001,7 +1159,9 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
             final compact = constraints.maxWidth < AppBreakpoints.compact;
             final wide = constraints.maxWidth >= AppBreakpoints.medium;
             final padding = EdgeInsets.all(
-              compact ? AppStyles.pagePaddingCompact : AppStyles.pagePaddingRegular,
+              compact
+                  ? AppStyles.pagePaddingCompact
+                  : AppStyles.pagePaddingRegular,
             );
 
             final content = Padding(
@@ -1071,18 +1231,19 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
   }) {
     final showProfileButton = _selectedNavIndex != 5;
     final sectionKey = <int, String>{
-      0: 'overview',
-      1: 'expenses',
-      2: 'categories',
-      3: 'monthly',
-      4: 'history',
-      5: 'about',
-    }[_selectedNavIndex] ?? 'section';
+          0: 'overview',
+          1: 'expenses',
+          2: 'categories',
+          3: 'monthly',
+          4: 'history',
+          5: 'about',
+        }[_selectedNavIndex] ??
+        'section';
     Widget section;
     switch (_selectedNavIndex) {
       case 0:
         section = Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             _buildSummary(stats),
             const SizedBox(height: 10),
@@ -1092,7 +1253,7 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
         break;
       case 1:
         section = Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             _buildSectionHeading(
               title: 'Expenses',
@@ -1105,11 +1266,12 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
         break;
       case 2:
         section = Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             _buildSectionHeading(
               title: 'Categories',
-              subtitle: 'Set category budgets to make spending limits easier to follow.',
+              subtitle:
+                  'Set category budgets to make spending limits easier to follow.',
             ),
             const SizedBox(height: 10),
             _buildCategorySection(),
@@ -1118,7 +1280,7 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
         break;
       case 3:
         section = Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             _buildSectionHeading(
               title: 'Monthly Summaries Table',
@@ -1131,11 +1293,12 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
         break;
       case 4:
         section = Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             _buildSectionHeading(
               title: 'Transaction History',
-              subtitle: 'Filter and search your transactions without scrolling through other sections.',
+              subtitle:
+                  'Filter and search your transactions without scrolling through other sections.',
             ),
             const SizedBox(height: 10),
             _buildHistorySection(txRows, categoryNames, monthOptions),
@@ -1144,7 +1307,7 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
         break;
       case 5:
         section = Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             _buildSectionHeading(
               title: 'About',
@@ -1161,13 +1324,16 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
 
     if (showProfileButton) {
       section = Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
             children: [
               Text(
                 'Coinzy',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+                style: Theme.of(context)
+                    .textTheme
+                    .titleLarge
+                    ?.copyWith(fontWeight: FontWeight.w800),
               ),
               const Spacer(),
               _buildSettingsButton(),
@@ -1194,15 +1360,16 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
     );
   }
 
-  Widget _buildSectionHeading({required String title, required String subtitle}) {
+  Widget _buildSectionHeading(
+      {required String title, required String subtitle}) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           title,
           style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-            fontWeight: FontWeight.w700,
-          ),
+                fontWeight: FontWeight.w700,
+              ),
         ),
         const SizedBox(height: 4),
         Text(subtitle),
@@ -1212,12 +1379,21 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
 
   Widget _buildSummary(DashboardStats stats) {
     final cards = [
-      _SummaryCard(label: 'Monthly Allowance', value: _money(_data.monthlyAllowance), note: 'Current month allocation'),
-      _SummaryCard(label: 'Expenses', value: _money(stats.spent), note: '${stats.count} transactions', tone: SummaryTone.warn),
+      _SummaryCard(
+          label: 'Monthly Allowance',
+          value: _money(_allowanceForMonthKey(_nowMonthKey())),
+          note: 'Current month allocation'),
+      _SummaryCard(
+          label: 'Expenses',
+          value: _money(stats.spent),
+          note: '${stats.count} transactions',
+          tone: SummaryTone.warn),
       _SummaryCard(
         label: 'Remaining',
         value: _money(stats.remaining),
-        note: stats.remaining < 0 ? '${_money(stats.remaining.abs())} over budget' : 'Healthy pace',
+        note: stats.remaining < 0
+            ? '${_money(stats.remaining.abs())} over budget'
+            : 'Healthy pace',
         tone: stats.remaining < 0 ? SummaryTone.warn : SummaryTone.good,
       ),
       _SummaryCard(
@@ -1243,330 +1419,8 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
         return Wrap(
           spacing: 8,
           runSpacing: 8,
-          children: cards.map((c) => SizedBox(width: cardWidth, child: c)).toList(),
-        );
-      },
-    );
-  }
-
-  Widget _buildMainArea(DashboardStats stats, List<String> categoryNames) {
-    final scheme = Theme.of(context).colorScheme;
-
-    final panelLeft = Card(
-      child: Padding(
-        padding: const EdgeInsets.all(10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Expenses + Insights',
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        'Quick add and monitor spending.',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    ],
-                  ),
-                ),
-                Chip(
-                  visualDensity: VisualDensity.compact,
-                  label: Text('MONTH ${_monthLabel(_nowMonthKey()).toUpperCase()}'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final compact = constraints.maxWidth < AppBreakpoints.compact;
-                final titleWidth = compact ? constraints.maxWidth : 190.0;
-                final amountWidth = compact ? constraints.maxWidth : 130.0;
-                final categoryWidth = compact ? constraints.maxWidth : 150.0;
-                final dateWidth = compact ? constraints.maxWidth : 150.0;
-
-                return Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    SizedBox(
-                      width: titleWidth,
-                      child: TextField(
-                        controller: _expenseTitleController,
-                        decoration: const InputDecoration(
-                          labelText: 'Expense name',
-                          hintText: 'e.g., Lunch',
-                          border: OutlineInputBorder(),
-                        ),
-                      ),
-                    ),
-                    SizedBox(
-                      width: amountWidth,
-                      child: TextField(
-                        controller: _expenseAmountController,
-                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                        decoration: const InputDecoration(
-                          labelText: 'Amount',
-                          hintText: 'e.g., 15',
-                          border: OutlineInputBorder(),
-                        ),
-                      ),
-                    ),
-                    SizedBox(
-                      width: categoryWidth,
-                      child: DropdownButtonFormField<String>(
-                        isExpanded: true,
-                        initialValue: categoryNames.contains(_expenseCategory) ? _expenseCategory : (categoryNames.isNotEmpty ? categoryNames.first : null),
-                        items: categoryNames
-                            .map((name) => DropdownMenuItem(value: name, child: Text(name, overflow: TextOverflow.ellipsis)))
-                            .toList(),
-                        onChanged: categoryNames.isEmpty
-                            ? null
-                            : (v) {
-                          if (v != null) {
-                            setState(() => _expenseCategory = v);
-                          }
-                        },
-                        decoration: const InputDecoration(
-                          labelText: 'Category',
-                          border: OutlineInputBorder(),
-                        ),
-                      ),
-                    ),
-                    SizedBox(
-                      width: dateWidth,
-                      child: OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-                        ),
-                        icon: const Icon(Icons.event),
-                        label: Text(
-                          DateFormat('MMM d, yyyy').format(_expenseDate),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        onPressed: () async {
-                          final picked = await showDatePicker(
-                            context: context,
-                            initialDate: _expenseDate,
-                            firstDate: DateTime(2020),
-                            lastDate: DateTime(2100),
-                          );
-                          if (picked != null) {
-                            setState(() => _expenseDate = picked);
-                          }
-                        },
-                      ),
-                    ),
-                    if (compact)
-                      SizedBox(
-                        width: constraints.maxWidth,
-                        child: FilledButton(
-                          onPressed: categoryNames.isEmpty ? null : _addExpense,
-                          style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 12)),
-                          child: const Text('Add Expense'),
-                        ),
-                      )
-                    else
-                      FilledButton(
-                        onPressed: categoryNames.isEmpty ? null : _addExpense,
-                        style: FilledButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                          minimumSize: const Size(0, 38),
-                        ),
-                        child: const Text('Add Expense'),
-                      ),
-                  ],
-                );
-              },
-            ),
-            const SizedBox(height: 8),
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final compact = constraints.maxWidth < AppBreakpoints.compact;
-                if (compact) {
-                  return Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      SizedBox(width: constraints.maxWidth, child: _KpiTile(title: 'Top Category', value: stats.topCategoryLabel)),
-                      SizedBox(width: constraints.maxWidth, child: _KpiTile(title: 'This Week Spent', value: _money(stats.weekSpent))),
-                      SizedBox(width: constraints.maxWidth, child: _KpiTile(title: 'Largest Expense', value: _money(stats.largestExpense))),
-                    ],
-                  );
-                }
-
-                return Row(
-                  children: [
-                    Expanded(child: _KpiTile(title: 'Top Category', value: stats.topCategoryLabel)),
-                    const SizedBox(width: 8),
-                    Expanded(child: _KpiTile(title: 'This Week Spent', value: _money(stats.weekSpent))),
-                    const SizedBox(width: 8),
-                    Expanded(child: _KpiTile(title: 'Largest Expense', value: _money(stats.largestExpense))),
-                  ],
-                );
-              },
-            ),
-            const SizedBox(height: 8),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              decoration: BoxDecoration(
-                color: stats.remaining < 0 || stats.percentUsed >= 85
-                    ? scheme.errorContainer
-                    : scheme.primaryContainer,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(
-                  color: stats.remaining < 0 || stats.percentUsed >= 85
-                      ? scheme.error
-                      : scheme.primary,
-                ),
-              ),
-              child: Text(
-                stats.remaining < 0
-                    ? 'Budget exceeded. Reduce non-essential expenses.'
-                    : (stats.percentUsed >= 85
-                    ? 'Close to monthly limit.'
-                    : 'You are on track for this month.'),
-                style: TextStyle(
-                  color: stats.remaining < 0 || stats.percentUsed >= 85
-                      ? scheme.onErrorContainer
-                      : scheme.onPrimaryContainer,
-                  fontSize: 12,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-
-    final allowancePanel = Card(
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Allowance', style: TextStyle(fontWeight: FontWeight.w700)),
-            const SizedBox(height: 4),
-            Text(
-              'Current monthly allowance: ${_money(_data.monthlyAllowance)}',
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    color: scheme.primary,
-                  ),
-            ),
-            const SizedBox(height: 10),
-            if (!_isEditingAllowance)
-              OutlinedButton.icon(
-                onPressed: () {
-                  setState(() {
-                    _allowanceController.text = _data.monthlyAllowance.toStringAsFixed(0);
-                    _isEditingAllowance = true;
-                  });
-                },
-                icon: const Icon(Icons.edit_outlined),
-                label: const Text('Set amount'),
-              )
-            else ...[
-              TextField(
-                controller: _allowanceController,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(
-                  labelText: 'Monthly allowance',
-                  hintText: 'e.g., 350',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  FilledButton(
-                    onPressed: () async {
-                      final saved = await _saveAllowance();
-                      if (saved && mounted) {
-                        setState(() => _isEditingAllowance = false);
-                      }
-                    },
-                    style: FilledButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
-                    ),
-                    child: const Text('Save'),
-                  ),
-                  const SizedBox(width: 8),
-                  OutlinedButton(
-                    onPressed: () {
-                      setState(() => _isEditingAllowance = false);
-                    },
-                    child: const Text('Cancel'),
-                  ),
-                ],
-              ),
-            ],
-            const SizedBox(height: 8),
-            const Text('Tip: Values are saved locally in your device storage.'),
-          ],
-        ),
-      ),
-    );
-
-    final spentVsAllowancePanel = Card(
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Spent vs allowance: ${stats.percentUsed.toStringAsFixed(1)}% used',
-              style: const TextStyle(fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 8),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(999),
-              child: LinearProgressIndicator(
-                value: math.min(stats.percentUsed / 100, 1),
-                minHeight: 16,
-                backgroundColor: scheme.surfaceContainerHighest,
-                color: stats.percentUsed > 100 ? scheme.error : scheme.primary,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        if (constraints.maxWidth < 980) {
-          return Column(
-            children: [
-              allowancePanel,
-              const SizedBox(height: 10),
-              spentVsAllowancePanel,
-              const SizedBox(height: 10),
-              panelLeft,
-            ],
-          );
-        }
-        return Column(
-          children: [
-            allowancePanel,
-            const SizedBox(height: 10),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(flex: 2, child: panelLeft),
-                const SizedBox(width: 10),
-                Expanded(child: spentVsAllowancePanel),
-              ],
-            ),
-          ],
+          children:
+              cards.map((c) => SizedBox(width: cardWidth, child: c)).toList(),
         );
       },
     );
@@ -1576,14 +1430,16 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
     final months = _recentMonths(12).reversed.toList();
     final values = months
         .map((month) => _data.transactions
-        .where((tx) => _monthKey(tx.date) == month)
-        .fold<double>(0, (sum, tx) => sum + tx.amount))
+            .where((tx) => _monthKey(tx.date) == month)
+            .fold<double>(0, (sum, tx) => sum + tx.amount))
         .toList();
     final labels = months.map((m) => _monthLabel(m).split(' ').first).toList();
 
     final categories = _data.categories.keys.toList()..sort();
-    final effectiveLineCategory = categories.contains(_lineChartCategory) ? _lineChartCategory : 'all';
-    final selectedCategories = effectiveLineCategory == 'all' ? categories : [effectiveLineCategory];
+    final effectiveLineCategory =
+        categories.contains(_lineChartCategory) ? _lineChartCategory : 'all';
+    final selectedCategories =
+        effectiveLineCategory == 'all' ? categories : [effectiveLineCategory];
 
     final lineSeries = selectedCategories
         .map(
@@ -1592,14 +1448,18 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
             values: months
                 .map(
                   (month) => _data.transactions
-                      .where((tx) => _monthKey(tx.date) == month && tx.category == name)
+                      .where((tx) =>
+                          _monthKey(tx.date) == month && tx.category == name)
                       .fold<double>(0, (sum, tx) => sum + tx.amount),
                 )
                 .toList(),
           ),
         )
         .toList();
-    final lineColors = lineSeries.map((s) => _categoryLineColors[s.name] ?? _categoryLineSeedColors.first).toList();
+    final lineColors = lineSeries
+        .map(
+            (s) => _categoryLineColors[s.name] ?? _categoryLineSeedColors.first)
+        .toList();
 
     return Card(
       child: Padding(
@@ -1607,9 +1467,11 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Visual Overview', style: TextStyle(fontWeight: FontWeight.w700)),
+            const Text('Visual Overview',
+                style: TextStyle(fontWeight: FontWeight.w700)),
             const SizedBox(height: 4),
-            const Text('All graphs are grouped here for a quick visual summary.'),
+            const Text(
+                'All graphs are grouped here for a quick visual summary.'),
             const SizedBox(height: 8),
             LayoutBuilder(
               builder: (context, constraints) {
@@ -1657,7 +1519,8 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
                             ...categories.map(
                               (name) => DropdownMenuItem(
                                 value: name,
-                                child: Text(name, overflow: TextOverflow.ellipsis),
+                                child:
+                                    Text(name, overflow: TextOverflow.ellipsis),
                               ),
                             ),
                           ],
@@ -1665,7 +1528,10 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
                       ),
                     ],
                   ),
-                  child: MonthlyLineChart(series: lineSeries, labels: labels, lineColors: lineColors),
+                  child: MonthlyLineChart(
+                      series: lineSeries,
+                      labels: labels,
+                      lineColors: lineColors),
                 );
 
                 if (constraints.maxWidth < 900) {
@@ -1686,567 +1552,6 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
                     SizedBox(width: cardWidth, child: chartA),
                     SizedBox(width: cardWidth, child: chartB),
                   ],
-                );
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCategorySection() {
-    final current = _currentMonthTransactions();
-    final spentByCategory = <String, double>{};
-    for (final tx in current) {
-      spentByCategory[tx.category] = (spentByCategory[tx.category] ?? 0) + tx.amount;
-    }
-
-    final names = _data.categories.keys.toList()..sort();
-
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Categories', style: TextStyle(fontWeight: FontWeight.w700)),
-            const SizedBox(height: 4),
-            const Text('Assign budget per category to see where money goes.'),
-            const SizedBox(height: 8),
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final compact = constraints.maxWidth < AppBreakpoints.compact;
-                return Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
-                  children: [
-                    SizedBox(
-                      width: compact ? constraints.maxWidth : 220,
-                      child: TextField(
-                        controller: _categoryNameController,
-                        decoration: const InputDecoration(
-                          labelText: 'Category name',
-                          hintText: 'e.g., Bills',
-                          border: OutlineInputBorder(),
-                        ),
-                      ),
-                    ),
-                    SizedBox(
-                      width: compact ? constraints.maxWidth : 180,
-                      child: TextField(
-                        controller: _categoryBudgetController,
-                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                        decoration: const InputDecoration(
-                          labelText: 'Category budget',
-                          hintText: 'e.g., 100',
-                          border: OutlineInputBorder(),
-                        ),
-                      ),
-                    ),
-                    SizedBox(
-                      width: compact ? constraints.maxWidth : 230,
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: FilledButton(
-                              onPressed: _upsertCategory,
-                              style: FilledButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(vertical: 8),
-                                minimumSize: const Size(0, 34),
-                                visualDensity: VisualDensity.compact,
-                              ),
-                              child: const Text('Add / Update'),
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          Expanded(
-                            child: OutlinedButton(
-                              onPressed: _removeCategory,
-                              style: OutlinedButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(vertical: 8),
-                                minimumSize: const Size(0, 34),
-                                visualDensity: VisualDensity.compact,
-                              ),
-                              child: const Text('Remove'),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                );
-              },
-            ),
-            const SizedBox(height: 8),
-            if (names.isEmpty)
-              const Text('No categories yet. Add one above to start budgeting.')
-            else
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: DataTable(
-                  columns: const [
-                    DataColumn(label: Text('Category')),
-                    DataColumn(label: Text('Budget')),
-                    DataColumn(label: Text('Spent')),
-                    DataColumn(label: Text('Remaining')),
-                    DataColumn(label: Text('Usage')),
-                  ],
-                  rows: names.map((name) {
-                    final budget = _data.categories[name] ?? 0;
-                    final spent = spentByCategory[name] ?? 0;
-                    final remaining = budget - spent;
-                    final pct = budget > 0 ? (spent / budget) * 100 : 0.0;
-                    return DataRow(cells: [
-                      DataCell(Text(name)),
-                      DataCell(Text(_money(budget))),
-                      DataCell(Text(_money(spent))),
-                      DataCell(Text(_money(remaining), style: TextStyle(color: remaining < 0 ? Colors.red.shade700 : Colors.green.shade700))),
-                      DataCell(SizedBox(width: 130, child: Text('${pct.toStringAsFixed(0)}%'))),
-                    ]);
-                  }).toList(),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildMonthlySection() {
-    final scheme = Theme.of(context).colorScheme;
-    final summaryRows = _buildPeriodSummaryRows();
-    final totalRows = summaryRows.length;
-    final maxPage = totalRows == 0 ? 0 : ((totalRows - 1) ~/ _monthlyRowsPerPage);
-    final safePage = _monthlyPage.clamp(0, maxPage);
-    if (safePage != _monthlyPage) {
-      _monthlyPage = safePage;
-    }
-    final startIndex = totalRows == 0 ? 0 : safePage * _monthlyRowsPerPage;
-    final endIndex = totalRows == 0
-        ? 0
-        : math.min(startIndex + _monthlyRowsPerPage, totalRows);
-    final visibleRows = totalRows == 0 ? <_PeriodSummaryRow>[] : summaryRows.sublist(startIndex, endIndex);
-    final periodLabel = _summaryPeriod == 'month'
-        ? 'Month'
-        : _summaryPeriod == 'week'
-        ? 'Week'
-        : 'Year';
-
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Monthly Summaries', style: TextStyle(fontWeight: FontWeight.w700)),
-            const SizedBox(height: 4),
-            const Text('Compact calendar filters: pick period and date.'),
-            const SizedBox(height: 8),
-            LayoutBuilder(
-              builder: (context, constraints) {
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        ChoiceChip(
-                          label: const Text('Month'),
-                          selected: _summaryPeriod == 'month',
-                          onSelected: (_) => setState(() {
-                            _summaryPeriod = 'month';
-                            _monthlyPage = 0;
-                          }),
-                        ),
-                        ChoiceChip(
-                          label: const Text('Week'),
-                          selected: _summaryPeriod == 'week',
-                          onSelected: (_) => setState(() {
-                            _summaryPeriod = 'week';
-                            _monthlyPage = 0;
-                          }),
-                        ),
-                        ChoiceChip(
-                          label: const Text('Year'),
-                          selected: _summaryPeriod == 'year',
-                          onSelected: (_) => setState(() {
-                            _summaryPeriod = 'year';
-                            _monthlyPage = 0;
-                          }),
-                        ),
-                        if (_summaryPeriod == 'week')
-                          ActionChip(
-                            avatar: const Icon(Icons.calendar_month_outlined, size: 16),
-                            label: const Text('Date'),
-                            onPressed: _pickMonthlyAnchorDate,
-                          ),
-                        PopupMenuButton<int>(
-                          tooltip: 'Rows per page',
-                          onSelected: (value) {
-                            setState(() {
-                              _monthlyRowsPerPage = value;
-                              _monthlyPage = 0;
-                            });
-                          },
-                          itemBuilder: (context) => const [
-                            PopupMenuItem(value: 5, child: Text('5 rows')),
-                            PopupMenuItem(value: 8, child: Text('8 rows')),
-                            PopupMenuItem(value: 10, child: Text('10 rows')),
-                            PopupMenuItem(value: 20, child: Text('20 rows')),
-                          ],
-                          child: Chip(
-                            avatar: const Icon(Icons.table_rows_outlined, size: 16),
-                            label: Text('$_monthlyRowsPerPage rows'),
-                          ),
-                        ),
-                        PopupMenuButton<String>(
-                          tooltip: 'Manage Columns',
-                          onSelected: (value) {
-                            setState(() {
-                              switch (value) {
-                                case 'allowance':
-                                  _monthlyShowAllowance = !_monthlyShowAllowance;
-                                  break;
-                                case 'spent':
-                                  _monthlyShowSpent = !_monthlyShowSpent;
-                                  break;
-                                case 'saved':
-                                  _monthlyShowSaved = !_monthlyShowSaved;
-                                  break;
-                                case 'rate':
-                                  _monthlyShowRate = !_monthlyShowRate;
-                                  break;
-                              }
-                              if (_monthlyVisibleColumnCount() == 1) {
-                                _monthlyShowAllowance = true;
-                              }
-                            });
-                          },
-                          itemBuilder: (context) => [
-                            CheckedPopupMenuItem<String>(
-                              value: 'allowance',
-                              checked: _monthlyShowAllowance,
-                              child: const Text('Allowance'),
-                            ),
-                            CheckedPopupMenuItem<String>(
-                              value: 'spent',
-                              checked: _monthlyShowSpent,
-                              child: const Text('Spent'),
-                            ),
-                            CheckedPopupMenuItem<String>(
-                              value: 'saved',
-                              checked: _monthlyShowSaved,
-                              child: const Text('Saved'),
-                            ),
-                            CheckedPopupMenuItem<String>(
-                              value: 'rate',
-                              checked: _monthlyShowRate,
-                              child: const Text('Spend Rate'),
-                            ),
-                          ],
-                          child: const Chip(
-                            avatar: Icon(Icons.view_column_outlined, size: 16),
-                            label: Text('Columns'),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                );
-              },
-            ),
-            const SizedBox(height: 8),
-            Container(
-              decoration: BoxDecoration(
-                border: Border.all(color: scheme.outlineVariant),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Theme(
-                  data: Theme.of(context).copyWith(
-                    dividerColor: scheme.outlineVariant.withValues(alpha: 0.45),
-                  ),
-                  child: DataTable(
-                    headingRowColor: WidgetStateProperty.all(scheme.surfaceContainerHigh),
-                    headingTextStyle: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      color: scheme.onSurfaceVariant,
-                      fontSize: 12,
-                    ),
-                    columnSpacing: 26,
-                    horizontalMargin: 14,
-                    columns: [
-                      DataColumn(label: Text(periodLabel.toUpperCase())),
-                      if (_monthlyShowAllowance) const DataColumn(label: Text('ALLOWANCE')),
-                      if (_monthlyShowSpent) const DataColumn(label: Text('SPENT')),
-                      if (_monthlyShowSaved) const DataColumn(label: Text('SAVED')),
-                      if (_monthlyShowRate) const DataColumn(label: Text('SPEND RATE')),
-                    ],
-                    rows: visibleRows.map((row) {
-                      final saved = row.allowance - row.spent;
-                      final rate = row.allowance > 0 ? (row.spent / row.allowance) * 100 : 0.0;
-                      return DataRow(cells: [
-                        DataCell(Text(row.label)),
-                        if (_monthlyShowAllowance) DataCell(Text(_money(row.allowance))),
-                        if (_monthlyShowSpent) DataCell(Text(_money(row.spent))),
-                        if (_monthlyShowSaved)
-                          DataCell(Text(_money(saved), style: TextStyle(color: saved < 0 ? Colors.red.shade700 : Colors.green.shade700))),
-                        if (_monthlyShowRate) DataCell(Text('${rate.toStringAsFixed(1)}%')),
-                      ]);
-                    }).toList(),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  totalRows == 0
-                      ? 'No rows'
-                      : 'Showing ${startIndex + 1} - $endIndex of $totalRows',
-                  style: TextStyle(color: scheme.onSurfaceVariant),
-                ),
-                Row(
-                  children: [
-                    IconButton(
-                      onPressed: safePage > 0
-                          ? () => setState(() => _monthlyPage = safePage - 1)
-                          : null,
-                      icon: const Icon(Icons.chevron_left),
-                    ),
-                    Text('${safePage + 1}/${maxPage + 1}'),
-                    IconButton(
-                      onPressed: safePage < maxPage
-                          ? () => setState(() => _monthlyPage = safePage + 1)
-                          : null,
-                      icon: const Icon(Icons.chevron_right),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildHistorySection(List<ExpenseTx> rows, List<String> categories, List<String> months) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Transaction History', style: TextStyle(fontWeight: FontWeight.w700)),
-            const SizedBox(height: 4),
-            const Text('Use filters to quickly find the expense you need.'),
-            const SizedBox(height: 8),
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final compact = constraints.maxWidth < AppBreakpoints.compact;
-                return Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
-                  children: [
-                    SizedBox(
-                      width: compact ? constraints.maxWidth : 220,
-                      child: TextField(
-                        controller: _searchController,
-                        decoration: const InputDecoration(
-                          labelText: 'Search by expense name',
-                          border: OutlineInputBorder(),
-                          prefixIcon: Icon(Icons.search),
-                        ),
-                      ),
-                    ),
-                    SizedBox(
-                      width: compact ? constraints.maxWidth : 180,
-                      child: DropdownButtonFormField<String>(
-                        isExpanded: true,
-                        initialValue: _filterCategory,
-                        items: [
-                          const DropdownMenuItem(value: 'all', child: Text('All categories')),
-                          ...categories.map((c) => DropdownMenuItem(value: c, child: Text(c, overflow: TextOverflow.ellipsis))),
-                        ],
-                        onChanged: (v) {
-                          if (v != null) {
-                            setState(() => _filterCategory = v);
-                          }
-                        },
-                        decoration: const InputDecoration(border: OutlineInputBorder()),
-                      ),
-                    ),
-                    SizedBox(
-                      width: compact ? constraints.maxWidth : 180,
-                      child: DropdownButtonFormField<String>(
-                        isExpanded: true,
-                        initialValue: _filterMonth,
-                        items: [
-                          const DropdownMenuItem(value: 'all', child: Text('All months')),
-                          ...months.map((m) => DropdownMenuItem(value: m, child: Text(_monthLabel(m), overflow: TextOverflow.ellipsis))),
-                        ],
-                        onChanged: (v) {
-                          if (v != null) {
-                            setState(() => _filterMonth = v);
-                          }
-                        },
-                        decoration: const InputDecoration(border: OutlineInputBorder()),
-                      ),
-                    ),
-                    if (compact)
-                      SizedBox(
-                        width: constraints.maxWidth,
-                        child: OutlinedButton(
-                          onPressed: () {
-                            setState(() {
-                              _searchController.clear();
-                              _filterCategory = 'all';
-                              _filterMonth = 'all';
-                              _historyPage = 0;
-                            });
-                          },
-                          child: const Text('Clear'),
-                        ),
-                      )
-                    else
-                      OutlinedButton(
-                        onPressed: () {
-                          setState(() {
-                            _searchController.clear();
-                            _filterCategory = 'all';
-                            _filterMonth = 'all';
-                            _historyPage = 0;
-                          });
-                        },
-                        child: const Text('Clear'),
-                      ),
-                  ],
-                );
-              },
-            ),
-            const SizedBox(height: 8),
-            if (rows.isEmpty)
-              const Text('No transactions found for this filter.')
-            else
-              LayoutBuilder(
-                builder: (context, constraints) {
-                  final compact = constraints.maxWidth < AppBreakpoints.compact;
-                  final start = _historyPage * _historyRowsPerPage;
-                  final end = math.min(start + _historyRowsPerPage, rows.length);
-                  final paginatedRows = rows.sublist(start, end);
-                  if (compact) {
-                    return Column(
-                      children: paginatedRows.map((tx) {
-                        return Card(
-                          margin: const EdgeInsets.only(bottom: 8),
-                          child: ListTile(
-                            title: Text(tx.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-                            subtitle: Text('${DateFormat('MMM d, yyyy').format(tx.date)} • ${tx.category}'),
-                            trailing: Text(
-                              _money(tx.amount),
-                              style: const TextStyle(fontWeight: FontWeight.w700),
-                            ),
-                          ),
-                        );
-                      }).toList(),
-                    );
-                  }
-
-                  return SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: DataTable(
-                      columnSpacing: 28,
-                      dataRowMinHeight: 48,
-                      dataRowMaxHeight: 56,
-                      columns: const [
-                        DataColumn(label: Text('Date')),
-                        DataColumn(label: Text('Title')),
-                        DataColumn(label: Text('Category')),
-                        DataColumn(numeric: true, label: Text('Amount')),
-                      ],
-                      rows: paginatedRows.map((tx) {
-                        return DataRow(cells: [
-                          DataCell(Text(DateFormat('MMM d, yyyy').format(tx.date))),
-                          DataCell(SizedBox(width: 220, child: Text(tx.title, overflow: TextOverflow.ellipsis))),
-                          DataCell(SizedBox(width: 120, child: Text(tx.category, overflow: TextOverflow.ellipsis))),
-                          DataCell(Align(alignment: Alignment.centerRight, child: Text(_money(tx.amount)))),
-                        ]);
-                      }).toList(),
-                    ),
-                  );
-                },
-              ),
-            const SizedBox(height: 8),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  rows.isEmpty
-                      ? 'No rows'
-                      : 'Showing ${(_historyPage * _historyRowsPerPage) + 1} - ${math.min((_historyPage + 1) * _historyRowsPerPage, rows.length)} of ${rows.length}',
-                  style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
-                ),
-                Row(
-                  children: [
-                    IconButton(
-                      onPressed: _historyPage > 0 ? () => setState(() => _historyPage--) : null,
-                      icon: const Icon(Icons.chevron_left),
-                    ),
-                    Text('${_historyPage + 1}/${rows.isEmpty ? 1 : ((rows.length - 1) ~/ _historyRowsPerPage) + 1}'),
-                    IconButton(
-                      onPressed: ((_historyPage + 1) * _historyRowsPerPage) < rows.length ? () => setState(() => _historyPage++) : null,
-                      icon: const Icon(Icons.chevron_right),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildAboutCard() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Coinzy', style: TextStyle(fontWeight: FontWeight.w700)),
-            const SizedBox(height: 6),
-            const Text('This app helps students track monthly allowance, categorize expenses, and review spending trends with simple and clear sections.'),
-            const SizedBox(height: 8),
-            const Text('Steps', style: TextStyle(fontWeight: FontWeight.w700)),
-            const SizedBox(height: 8),
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final compact = constraints.maxWidth < AppBreakpoints.compact;
-                final medium = constraints.maxWidth < AppBreakpoints.medium;
-                double cardWidth;
-                if (compact) {
-                  cardWidth = constraints.maxWidth;
-                } else if (medium) {
-                  cardWidth = (constraints.maxWidth - 10) / 2;
-                } else {
-                  cardWidth = 280;
-                }
-
-                return Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
-                  children: const [
-                    _GuideCard(step: 'Step 1', title: 'Set your monthly allowance', body: 'Use the Allowance card to save your budget in PHP.'),
-                    _GuideCard(step: 'Step 2', title: 'Add expenses as they happen', body: 'Each entry updates your totals, progress bar, and insights automatically.'),
-                    _GuideCard(step: 'Step 3', title: 'Review trends monthly', body: 'Check categories, monthly summaries, and filter transaction history.'),
-                  ].map((g) => SizedBox(width: cardWidth, child: g)).toList(),
                 );
               },
             ),
@@ -2294,7 +1599,11 @@ class _SummaryCard extends StatelessWidget {
           children: [
             Text(label, style: const TextStyle(fontWeight: FontWeight.w500)),
             const SizedBox(height: 6),
-            Text(value, style: TextStyle(fontWeight: FontWeight.w700, fontSize: 20, color: valueColor)),
+            Text(value,
+                style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 20,
+                    color: valueColor)),
             const SizedBox(height: 4),
             Text(note),
           ],
@@ -2323,9 +1632,15 @@ class _KpiTile extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
+          Text(title,
+              style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
           const SizedBox(height: 2),
-          Text(value, style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: scheme.onSurface), overflow: TextOverflow.ellipsis),
+          Text(value,
+              style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13,
+                  color: scheme.onSurface),
+              overflow: TextOverflow.ellipsis),
         ],
       ),
     );
@@ -2333,7 +1648,8 @@ class _KpiTile extends StatelessWidget {
 }
 
 class _GuideCard extends StatelessWidget {
-  const _GuideCard({required this.step, required this.title, required this.body});
+  const _GuideCard(
+      {required this.step, required this.title, required this.body});
 
   final String step;
   final String title;
@@ -2348,7 +1664,9 @@ class _GuideCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(step, style: TextStyle(fontWeight: FontWeight.w700, color: scheme.primary)),
+            Text(step,
+                style: TextStyle(
+                    fontWeight: FontWeight.w700, color: scheme.primary)),
             const SizedBox(height: 4),
             Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
             const SizedBox(height: 4),
@@ -2413,7 +1731,8 @@ class _LineSeries {
 }
 
 class MonthlyBarChart extends StatelessWidget {
-  const MonthlyBarChart({super.key, required this.values, required this.labels});
+  const MonthlyBarChart(
+      {super.key, required this.values, required this.labels});
 
   final List<double> values;
   final List<String> labels;
@@ -2485,12 +1804,16 @@ class _MonthlyBarPainter extends CustomPainter {
 
     for (var tick = 1000.0; tick <= yMax; tick += 1000.0) {
       final y = padTop + chartH - ((tick / yMax) * chartH);
-      canvas.drawLine(Offset(padLeft, y), Offset(size.width - padRight, y), gridPaint);
+      canvas.drawLine(
+          Offset(padLeft, y), Offset(size.width - padRight, y), gridPaint);
       final valuePainter = TextPainter(
-        text: TextSpan(text: tick.toInt().toString(), style: TextStyle(color: valueColor, fontSize: 10)),
+        text: TextSpan(
+            text: tick.toInt().toString(),
+            style: TextStyle(color: valueColor, fontSize: 10)),
         textDirection: TextDirection.ltr,
       )..layout(maxWidth: padRight - 4);
-      valuePainter.paint(canvas, Offset(size.width - padRight + 4, y - (valuePainter.height / 2)));
+      valuePainter.paint(canvas,
+          Offset(size.width - padRight + 4, y - (valuePainter.height / 2)));
     }
 
     final count = values.length;
@@ -2519,7 +1842,8 @@ class _MonthlyBarPainter extends CustomPainter {
         text: TextSpan(text: labels[i], style: style),
         textDirection: TextDirection.ltr,
       )..layout(maxWidth: math.max(barW + 12, 24));
-      painter.paint(canvas, Offset(x - ((painter.width - barW) / 2), size.height - 16));
+      painter.paint(
+          canvas, Offset(x - ((painter.width - barW) / 2), size.height - 16));
     }
   }
 
@@ -2544,7 +1868,8 @@ class MonthlyLineChart extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (series.isEmpty) {
-      return const Center(child: Text('No spending data for selected category.'));
+      return const Center(
+          child: Text('No spending data for selected category.'));
     }
 
     final scheme = Theme.of(context).colorScheme;
@@ -2620,12 +1945,16 @@ class _MonthlyLinePainter extends CustomPainter {
 
     for (var tick = 100.0; tick <= yMax; tick += 100.0) {
       final y = padTop + chartH - ((tick / yMax) * chartH);
-      canvas.drawLine(Offset(padLeft, y), Offset(size.width - padRight, y), gridPaint);
+      canvas.drawLine(
+          Offset(padLeft, y), Offset(size.width - padRight, y), gridPaint);
       final valuePainter = TextPainter(
-        text: TextSpan(text: tick.toInt().toString(), style: TextStyle(color: valueColor, fontSize: 10)),
+        text: TextSpan(
+            text: tick.toInt().toString(),
+            style: TextStyle(color: valueColor, fontSize: 10)),
         textDirection: TextDirection.ltr,
       )..layout(maxWidth: padRight - 4);
-      valuePainter.paint(canvas, Offset(size.width - padRight + 4, y - (valuePainter.height / 2)));
+      valuePainter.paint(canvas,
+          Offset(size.width - padRight + 4, y - (valuePainter.height / 2)));
     }
 
     final count = labels.length;
@@ -2663,7 +1992,8 @@ class _MonthlyLinePainter extends CustomPainter {
     for (var i = 0; i < labels.length; i++) {
       final x = padLeft + (count > 1 ? i * xStep : chartW / 2);
       final painter = TextPainter(
-        text: TextSpan(text: labels[i], style: TextStyle(color: labelColor, fontSize: 10)),
+        text: TextSpan(
+            text: labels[i], style: TextStyle(color: labelColor, fontSize: 10)),
         textDirection: TextDirection.ltr,
       )..layout(maxWidth: 42);
       painter.paint(canvas, Offset(x - painter.width / 2, size.height - 16));
@@ -2710,10 +2040,13 @@ class DashboardStats {
 
   factory DashboardStats.fromData(BudgetData data, DateTime now) {
     final monthKey = DateFormat('yyyy-MM').format(now);
-    final monthTx = data.transactions.where((tx) => DateFormat('yyyy-MM').format(tx.date) == monthKey).toList();
+    final monthTx = data.transactions
+        .where((tx) => DateFormat('yyyy-MM').format(tx.date) == monthKey)
+        .toList();
+    final monthAllowance = data.allowanceForMonth(now.year, now.month);
 
     final spent = monthTx.fold<double>(0, (sum, tx) => sum + tx.amount);
-    final remaining = data.monthlyAllowance - spent;
+    final remaining = monthAllowance - spent;
     final day = now.day;
     final daysInMonth = DateTime(now.year, now.month + 1, 0).day;
     final dailyAverage = day > 0 ? spent / day : 0.0;
@@ -2734,12 +2067,15 @@ class DashboardStats {
 
     final weekStart = now.subtract(const Duration(days: 7));
     final weekSpent = monthTx
-        .where((tx) => tx.date.isAfter(weekStart) || tx.date.isAtSameMomentAs(weekStart))
+        .where((tx) =>
+            tx.date.isAfter(weekStart) || tx.date.isAtSameMomentAs(weekStart))
         .fold<double>(0, (sum, tx) => sum + tx.amount);
 
-    final largest = monthTx.fold<double>(0, (max, tx) => math.max(max, tx.amount));
+    final largest =
+        monthTx.fold<double>(0, (max, tx) => math.max(max, tx.amount));
 
-    final percentUsed = data.monthlyAllowance > 0 ? (spent / data.monthlyAllowance) * 100 : 0.0;
+    final percentUsed =
+        monthAllowance > 0 ? (spent / monthAllowance) * 100 : 0.0;
 
     return DashboardStats(
       spent: spent,
@@ -2759,17 +2095,35 @@ class DashboardStats {
 class BudgetData {
   BudgetData({
     required this.monthlyAllowance,
+    required this.monthAllowances,
     required this.categories,
     required this.transactions,
   });
 
   double monthlyAllowance;
+  Map<String, double> monthAllowances;
   Map<String, double> categories;
   List<ExpenseTx> transactions;
+
+  double allowanceForMonth(int year, int month) {
+    final key = '$year-${month.toString().padLeft(2, '0')}';
+    final fromMap = monthAllowances[key];
+    if (fromMap != null && fromMap > 0) {
+      return fromMap;
+    }
+
+    final now = DateTime.now();
+    if (year == now.year && month == now.month && monthlyAllowance > 0) {
+      return monthlyAllowance;
+    }
+
+    return 0;
+  }
 
   String toJson() {
     final map = {
       'monthlyAllowance': monthlyAllowance,
+      'monthAllowances': monthAllowances,
       'categories': categories,
       'transactions': transactions.map((t) => t.toMap()).toList(),
     };
@@ -2780,16 +2134,26 @@ class BudgetData {
     try {
       final map = jsonDecode(raw) as Map<String, dynamic>;
       final categoriesRaw = map['categories'] as Map<String, dynamic>? ?? {};
+      final monthAllowancesRaw =
+          map['monthAllowances'] as Map<String, dynamic>? ?? {};
       final txRaw = map['transactions'] as List<dynamic>? ?? [];
       final categories = <String, double>{};
+      final monthAllowances = <String, double>{};
       categoriesRaw.forEach((key, value) {
         final amount = (value as num?)?.toDouble();
         if (amount != null && amount > 0) {
           categories[key] = amount;
         }
       });
+      monthAllowancesRaw.forEach((key, value) {
+        final amount = (value as num?)?.toDouble();
+        if (amount != null && amount > 0) {
+          monthAllowances[key] = amount;
+        }
+      });
       return BudgetData(
         monthlyAllowance: ((map['monthlyAllowance'] as num?)?.toDouble() ?? 0),
+        monthAllowances: monthAllowances,
         categories: categories,
         transactions: txRaw
             .map((item) => ExpenseTx.fromMap(item as Map<String, dynamic>))
@@ -2803,6 +2167,7 @@ class BudgetData {
   factory BudgetData.defaultState() {
     return BudgetData(
       monthlyAllowance: 0,
+      monthAllowances: {},
       categories: {},
       transactions: [],
     );
@@ -2909,7 +2274,8 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> _openCurrencyPicker() async {
     final options = widget.currencySymbols.entries
         .where((entry) =>
-            _currencyNames.containsKey(entry.key) && _countryCodes.containsKey(entry.key))
+            _currencyNames.containsKey(entry.key) &&
+            _countryCodes.containsKey(entry.key))
         .map(
           (entry) => _CurrencyOption(
             code: entry.key,
@@ -2975,8 +2341,8 @@ class _SettingsPageState extends State<SettingsPage> {
                   Text(
                     _selectedCurrency,
                     style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
+                          fontWeight: FontWeight.w700,
+                        ),
                   ),
                   const SizedBox(width: 6),
                   const Icon(Icons.chevron_right),
@@ -3125,7 +2491,8 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
   Future<void> _verifyCurrentPassword() async {
     final currentPassword = _currentPasswordController.text;
     if (currentPassword.isEmpty) {
-      await _showAlert(title: 'Missing Password', message: 'Enter your current password.');
+      await _showAlert(
+          title: 'Missing Password', message: 'Enter your current password.');
       return;
     }
 
@@ -3134,7 +2501,10 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
       await AuthService.verifyCurrentPassword(currentPassword: currentPassword);
       if (!mounted) return;
       setState(() => _verifiedCurrentPassword = true);
-      await _showAlert(title: 'Verified', message: 'Current password verified.', success: true);
+      await _showAlert(
+          title: 'Verified',
+          message: 'Current password verified.',
+          success: true);
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
       final message =
@@ -3161,7 +2531,9 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
     final confirmPassword = _confirmPasswordController.text;
 
     if (newPassword.length < 6) {
-      await _showAlert(title: 'Weak Password', message: 'Password must be at least 6 characters.');
+      await _showAlert(
+          title: 'Weak Password',
+          message: 'Password must be at least 6 characters.');
       return;
     }
 
@@ -3173,7 +2545,8 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
     if (currentPassword.isNotEmpty && newPassword == currentPassword) {
       await _showAlert(
         title: 'Use a Different Password',
-        message: 'Your new password must be different from your current password.',
+        message:
+            'Your new password must be different from your current password.',
       );
       return;
     }
@@ -3182,23 +2555,31 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
     try {
       await AuthService.updateCurrentUserPassword(newPassword: newPassword);
       if (!mounted) return;
-      await _showAlert(title: 'Success', message: 'Password changed successfully.', success: true);
+      await _showAlert(
+          title: 'Success',
+          message: 'Password changed successfully.',
+          success: true);
       Navigator.of(context).pop();
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
       final raw = e.toString();
-      final isKnownPluginCastIssue =
-          raw.contains('PigeonUserDetails') ||
+      final isKnownPluginCastIssue = raw.contains('PigeonUserDetails') ||
           raw.contains("List<Object> is not a subtype");
       if (isKnownPluginCastIssue) {
-        await _showAlert(title: 'Success', message: 'Password changed successfully.', success: true);
+        await _showAlert(
+            title: 'Success',
+            message: 'Password changed successfully.',
+            success: true);
         Navigator.of(context).pop();
         return;
       }
 
       if (await _didPasswordActuallyChange(newPassword)) {
         if (!mounted) return;
-        await _showAlert(title: 'Success', message: 'Password changed successfully.', success: true);
+        await _showAlert(
+            title: 'Success',
+            message: 'Password changed successfully.',
+            success: true);
         Navigator.of(context).pop();
         return;
       }
@@ -3213,23 +2594,29 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
     } catch (e) {
       if (!mounted) return;
       final raw = e.toString();
-      final isKnownPluginCastIssue =
-          raw.contains('PigeonUserDetails') ||
+      final isKnownPluginCastIssue = raw.contains('PigeonUserDetails') ||
           raw.contains("List<Object> is not a subtype");
       if (isKnownPluginCastIssue) {
-        await _showAlert(title: 'Success', message: 'Password changed successfully.', success: true);
+        await _showAlert(
+            title: 'Success',
+            message: 'Password changed successfully.',
+            success: true);
         Navigator.of(context).pop();
         return;
       }
 
       if (await _didPasswordActuallyChange(newPassword)) {
         if (!mounted) return;
-        await _showAlert(title: 'Success', message: 'Password changed successfully.', success: true);
+        await _showAlert(
+            title: 'Success',
+            message: 'Password changed successfully.',
+            success: true);
         Navigator.of(context).pop();
         return;
       }
 
-      await _showAlert(title: 'Update Failed', message: 'Password change failed.');
+      await _showAlert(
+          title: 'Update Failed', message: 'Password change failed.');
     } finally {
       if (mounted) {
         setState(() => _isSaving = false);
@@ -3255,8 +2642,8 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
                         ? 'Step 2: Enter your new password'
                         : 'Step 1: Verify your current password',
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
+                          fontWeight: FontWeight.w700,
+                        ),
                   ),
                   const SizedBox(height: 8),
                   if (!_verifiedCurrentPassword) ...[
@@ -3273,8 +2660,9 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
                           onPressed: _isVerifying
                               ? null
                               : () => setState(
-                                  () => _showCurrentPassword = !_showCurrentPassword,
-                                ),
+                                    () => _showCurrentPassword =
+                                        !_showCurrentPassword,
+                                  ),
                           icon: Icon(
                             _showCurrentPassword
                                 ? Icons.visibility
@@ -3293,10 +2681,13 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
                               child: CircularProgressIndicator(strokeWidth: 2),
                             )
                           : const Icon(Icons.verified_user_outlined),
-                      label: Text(_isVerifying ? 'Verifying...' : 'Verify current password'),
+                      label: Text(_isVerifying
+                          ? 'Verifying...'
+                          : 'Verify current password'),
                     ),
                   ] else ...[
-                    const Text('Now enter and confirm your new password. It must be different from your current password.'),
+                    const Text(
+                        'Now enter and confirm your new password. It must be different from your current password.'),
                     const SizedBox(height: 12),
                     TextField(
                       controller: _newPasswordController,
@@ -3308,9 +2699,12 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
                         suffixIcon: IconButton(
                           onPressed: _isSaving
                               ? null
-                              : () => setState(() => _showNewPassword = !_showNewPassword),
+                              : () => setState(
+                                  () => _showNewPassword = !_showNewPassword),
                           icon: Icon(
-                            _showNewPassword ? Icons.visibility : Icons.visibility_off,
+                            _showNewPassword
+                                ? Icons.visibility
+                                : Icons.visibility_off,
                           ),
                         ),
                       ),
@@ -3326,8 +2720,8 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
                         suffixIcon: IconButton(
                           onPressed: _isSaving
                               ? null
-                              : () =>
-                                  setState(() => _showConfirmPassword = !_showConfirmPassword),
+                              : () => setState(() =>
+                                  _showConfirmPassword = !_showConfirmPassword),
                           icon: Icon(
                             _showConfirmPassword
                                 ? Icons.visibility
@@ -3346,7 +2740,8 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
                               child: CircularProgressIndicator(strokeWidth: 2),
                             )
                           : const Icon(Icons.save_outlined),
-                      label: Text(_isSaving ? 'Saving...' : 'Save new password'),
+                      label:
+                          Text(_isSaving ? 'Saving...' : 'Save new password'),
                     ),
                     const SizedBox(height: 8),
                     TextButton(
@@ -3429,8 +2824,8 @@ class _CurrencyPickerDialogState extends State<_CurrencyPickerDialog> {
                   Text(
                     'Choose a currency',
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
+                          fontWeight: FontWeight.w700,
+                        ),
                   ),
                 ],
               ),
@@ -3442,7 +2837,8 @@ class _CurrencyPickerDialogState extends State<_CurrencyPickerDialog> {
                   prefixIcon: const Icon(Icons.search),
                   hintText: 'Search',
                   filled: true,
-                  fillColor: scheme.surfaceContainerHighest.withValues(alpha: 0.55),
+                  fillColor:
+                      scheme.surfaceContainerHighest.withValues(alpha: 0.55),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
                     borderSide: BorderSide.none,
@@ -3453,7 +2849,8 @@ class _CurrencyPickerDialogState extends State<_CurrencyPickerDialog> {
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: scheme.primary.withValues(alpha: 0.5)),
+                    borderSide: BorderSide(
+                        color: scheme.primary.withValues(alpha: 0.5)),
                   ),
                   contentPadding: const EdgeInsets.symmetric(vertical: 10),
                 ),
@@ -3492,7 +2889,8 @@ class _CurrencyPickerDialogState extends State<_CurrencyPickerDialog> {
                             ),
                             title: Text(
                               option.code,
-                              style: const TextStyle(fontWeight: FontWeight.w700),
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.w700),
                             ),
                             subtitle: Text(option.name),
                             trailing: selected
@@ -3513,4 +2911,3 @@ class _CurrencyPickerDialogState extends State<_CurrencyPickerDialog> {
     );
   }
 }
-  

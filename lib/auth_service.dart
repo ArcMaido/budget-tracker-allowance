@@ -29,9 +29,9 @@ class AuthService {
   static bool _isKnownPigeonCastIssue(Object error) {
     final message = error.toString();
     return message.contains('PigeonUserDetails') ||
-      message.contains('PigeonUserInfo') ||
-      message.contains("List<Object> is not a subtype") ||
-      message.contains("List<Object?> is not a subtype");
+        message.contains('PigeonUserInfo') ||
+        message.contains("List<Object> is not a subtype") ||
+        message.contains("List<Object?> is not a subtype");
   }
 
   static Future<bool> verifyCurrentUserStillExistsRemotely() async {
@@ -73,7 +73,9 @@ class AuthService {
 
         final decoded = jsonDecode(body);
         final message = (decoded is Map<String, dynamic>)
-            ? ((decoded['error'] as Map<String, dynamic>?)?['message'] as String? ?? '')
+            ? ((decoded['error'] as Map<String, dynamic>?)?['message']
+                    as String? ??
+                '')
             : '';
         if (message.contains('USER_NOT_FOUND') ||
             message.contains('INVALID_ID_TOKEN') ||
@@ -121,7 +123,9 @@ class AuthService {
         .trim();
     final compact = localSpaced.replaceAll(' ', '');
     final normalized = value.replaceAll(RegExp(r'\s+'), ' ').trim();
-    return normalized == local || normalized == localSpaced || normalized == compact;
+    return normalized == local ||
+        normalized == localSpaced ||
+        normalized == compact;
   }
 
   static String _pendingSignupNameKey(String email) =>
@@ -143,7 +147,8 @@ class AuthService {
       return;
     }
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_pendingSignupNameKey(normalizedEmail), normalizedName);
+    await prefs.setString(
+        _pendingSignupNameKey(normalizedEmail), normalizedName);
     await prefs.setString(_lastSignupNameKey(normalizedEmail), normalizedName);
   }
 
@@ -157,8 +162,10 @@ class AuthService {
       return;
     }
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_pendingSignupPhotoKey(normalizedEmail), normalizedPhoto);
-    await prefs.setString(_lastSignupPhotoKey(normalizedEmail), normalizedPhoto);
+    await prefs.setString(
+        _pendingSignupPhotoKey(normalizedEmail), normalizedPhoto);
+    await prefs.setString(
+        _lastSignupPhotoKey(normalizedEmail), normalizedPhoto);
   }
 
   static Future<String?> _consumePendingSignupFullName(String email) async {
@@ -220,7 +227,8 @@ class AuthService {
     return value;
   }
 
-  static Future<String?> _fetchGooglePhotoFromAccessToken(String? accessToken) async {
+  static Future<String?> _fetchGooglePhotoFromAccessToken(
+      String? accessToken) async {
     if (accessToken == null || accessToken.trim().isEmpty) {
       return null;
     }
@@ -294,12 +302,13 @@ class AuthService {
           photoUrl: photoUrl,
         );
         await _syncToLocalStorage(refreshedUser);
-        
+
         // Mark as new user in local preferences - this persists across sign-out
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('isNewUser', true);
         await prefs.setBool('onboardingCompleted', false);
-        debugPrint('Signup completed: userId=${refreshedUser.uid}, isNewUser=true');
+        debugPrint(
+            'Signup completed: userId=${refreshedUser.uid}, isNewUser=true');
       }
       return userCredential;
     } on FirebaseAuthException catch (e) {
@@ -307,8 +316,7 @@ class AuthService {
       rethrow;
     } catch (e) {
       final message = e.toString();
-      final isKnownPigeonCastIssue =
-          message.contains('PigeonUserDetails') ||
+      final isKnownPigeonCastIssue = message.contains('PigeonUserDetails') ||
           message.contains("List<Object> is not a subtype");
 
       if (isKnownPigeonCastIssue) {
@@ -381,8 +389,10 @@ class AuthService {
       if (userCredential.user != null) {
         User syncedUser = userCredential.user!;
         try {
-          final profileDoc =
-              await _firestore.collection('users').doc(userCredential.user!.uid).get();
+          final profileDoc = await _firestore
+              .collection('users')
+              .doc(userCredential.user!.uid)
+              .get();
           final profile = profileDoc.data();
           final pendingSignupName = await _consumePendingSignupFullName(email);
           final pendingSignupPhoto = await _consumePendingSignupPhotoUrl(email);
@@ -390,47 +400,63 @@ class AuthService {
           final storedPhoto = (profile?['photoUrl'] as String?)?.trim();
           final authPhoto = (userCredential.user!.photoURL ?? '').trim();
           final authName = (userCredential.user!.displayName ?? '').trim();
-          final shouldPreferPendingName =
-            pendingSignupName != null &&
-            pendingSignupName.isNotEmpty &&
-            !_looksLikeEmailDerivedName(pendingSignupName, userCredential.user!.email);
-          final shouldPreferAuthName =
-              authName.isNotEmpty &&
-              !_looksLikeEmailDerivedName(authName, userCredential.user!.email) &&
+          final shouldPreferPendingName = pendingSignupName != null &&
+              pendingSignupName.isNotEmpty &&
+              !_looksLikeEmailDerivedName(
+                  pendingSignupName, userCredential.user!.email);
+          final shouldPreferAuthName = authName.isNotEmpty &&
+              !_looksLikeEmailDerivedName(
+                  authName, userCredential.user!.email) &&
               (storedName == null ||
                   storedName.isEmpty ||
-                  _looksLikeEmailDerivedName(storedName, userCredential.user!.email));
+                  _looksLikeEmailDerivedName(
+                      storedName, userCredential.user!.email));
           final justCreated = _isJustCreatedUser(userCredential.user!);
-          final remoteIsNewUser = (profile?['isNewUser'] == true) || (profile == null && justCreated);
+          final remoteIsNewUser = (profile?['isNewUser'] == true) ||
+              (profile == null && justCreated);
           final remoteOnboardingDone = profile?['onboardingCompleted'] == true;
 
           if (shouldPreferPendingName) {
-            await _firestore.collection('users').doc(userCredential.user!.uid).set({
+            await _firestore
+                .collection('users')
+                .doc(userCredential.user!.uid)
+                .set({
               'fullName': pendingSignupName,
               'lastUpdated': DateTime.now(),
             }, SetOptions(merge: true));
             await userCredential.user!.updateDisplayName(pendingSignupName);
           } else if (shouldPreferAuthName) {
-            await _firestore.collection('users').doc(userCredential.user!.uid).set({
+            await _firestore
+                .collection('users')
+                .doc(userCredential.user!.uid)
+                .set({
               'fullName': authName,
               'lastUpdated': DateTime.now(),
             }, SetOptions(merge: true));
             await userCredential.user!.updateDisplayName(authName);
           } else if (storedName != null &&
               storedName.isNotEmpty &&
-              !_looksLikeEmailDerivedName(storedName, userCredential.user!.email)) {
+              !_looksLikeEmailDerivedName(
+                  storedName, userCredential.user!.email)) {
             await userCredential.user!.updateDisplayName(storedName);
           }
           if (storedPhoto != null && storedPhoto.isNotEmpty) {
             await userCredential.user!.updatePhotoURL(storedPhoto);
-          } else if (pendingSignupPhoto != null && pendingSignupPhoto.isNotEmpty) {
-            await _firestore.collection('users').doc(userCredential.user!.uid).set({
+          } else if (pendingSignupPhoto != null &&
+              pendingSignupPhoto.isNotEmpty) {
+            await _firestore
+                .collection('users')
+                .doc(userCredential.user!.uid)
+                .set({
               'photoUrl': pendingSignupPhoto,
               'lastUpdated': DateTime.now(),
             }, SetOptions(merge: true));
             await userCredential.user!.updatePhotoURL(pendingSignupPhoto);
           } else if (authPhoto.isNotEmpty) {
-            await _firestore.collection('users').doc(userCredential.user!.uid).set({
+            await _firestore
+                .collection('users')
+                .doc(userCredential.user!.uid)
+                .set({
               'photoUrl': authPhoto,
               'lastUpdated': DateTime.now(),
             }, SetOptions(merge: true));
@@ -441,7 +467,10 @@ class AuthService {
               final silentEmail = (silent?.email ?? '').trim().toLowerCase();
               final currentEmail = email.trim().toLowerCase();
               if (silentPhoto.isNotEmpty && silentEmail == currentEmail) {
-                await _firestore.collection('users').doc(userCredential.user!.uid).set({
+                await _firestore
+                    .collection('users')
+                    .doc(userCredential.user!.uid)
+                    .set({
                   'photoUrl': silentPhoto,
                   'lastUpdated': DateTime.now(),
                 }, SetOptions(merge: true));
@@ -455,7 +484,8 @@ class AuthService {
           final isNewUser = remoteIsNewUser && !remoteOnboardingDone;
           await prefs.setBool('isNewUser', isNewUser);
           await prefs.setBool('onboardingCompleted', remoteOnboardingDone);
-          debugPrint('Login profile sync: isNewUser=$isNewUser, remoteIsNewUser=$remoteIsNewUser, remoteOnboardingDone=$remoteOnboardingDone, justCreated=$justCreated');
+          debugPrint(
+              'Login profile sync: isNewUser=$isNewUser, remoteIsNewUser=$remoteIsNewUser, remoteOnboardingDone=$remoteOnboardingDone, justCreated=$justCreated');
           await userCredential.user!.reload();
           syncedUser = _auth.currentUser ?? userCredential.user!;
         } catch (e) {
@@ -465,7 +495,8 @@ class AuthService {
             final prefs = await SharedPreferences.getInstance();
             final existingIsNewUser = prefs.getBool('isNewUser') ?? false;
             final justCreated = _isJustCreatedUser(userCredential.user!);
-            debugPrint('Profile sync failed, preserving flags. existingIsNewUser=$existingIsNewUser, justCreated=$justCreated, error=$e');
+            debugPrint(
+                'Profile sync failed, preserving flags. existingIsNewUser=$existingIsNewUser, justCreated=$justCreated, error=$e');
             // If we had isNewUser set from signup, keep it. Or if the user was just created, mark as new.
             if (existingIsNewUser || justCreated) {
               await prefs.setBool('isNewUser', true);
@@ -482,8 +513,7 @@ class AuthService {
       rethrow;
     } catch (e) {
       final message = e.toString();
-      final isKnownPigeonCastIssue =
-          message.contains('PigeonUserDetails') ||
+      final isKnownPigeonCastIssue = message.contains('PigeonUserDetails') ||
           message.contains("List<Object> is not a subtype");
 
       if (isKnownPigeonCastIssue) {
@@ -525,7 +555,8 @@ class AuthService {
 
       final userCredential = await _auth.signInWithCredential(credential);
       if (userCredential.user != null) {
-        final isNewGoogleUser = userCredential.additionalUserInfo?.isNewUser ?? false;
+        final isNewGoogleUser =
+            userCredential.additionalUserInfo?.isNewUser ?? false;
         final resolvedGoogleName = _resolvePreferredName(
           email: userCredential.user!.email,
           displayName: userCredential.user!.displayName,
@@ -533,7 +564,8 @@ class AuthService {
         );
 
         try {
-          if ((userCredential.user!.displayName ?? '').trim() != resolvedGoogleName) {
+          if ((userCredential.user!.displayName ?? '').trim() !=
+              resolvedGoogleName) {
             await userCredential.user!.updateDisplayName(resolvedGoogleName);
           }
         } catch (_) {
@@ -550,7 +582,8 @@ class AuthService {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('isNewUser', isNewGoogleUser);
         await prefs.setBool('onboardingCompleted', !isNewGoogleUser);
-        debugPrint('Google sign-in: userId=${userCredential.user!.uid}, isNewUser=$isNewGoogleUser');
+        debugPrint(
+            'Google sign-in: userId=${userCredential.user!.uid}, isNewUser=$isNewGoogleUser');
         await _syncToLocalStorage(userCredential.user!);
       }
       return userCredential;
@@ -580,10 +613,11 @@ class AuthService {
       final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
       if (googleUser == null) return null;
 
-      String? resolvedPhoto = (googleUser.photoUrl ?? '').trim();
+      String? resolvedPhoto = googleUser.photoUrl?.trim();
       if (resolvedPhoto == null || resolvedPhoto.isEmpty) {
         final auth = await googleUser.authentication;
-        resolvedPhoto = await _fetchGooglePhotoFromAccessToken(auth.accessToken);
+        resolvedPhoto =
+            await _fetchGooglePhotoFromAccessToken(auth.accessToken);
       }
       if (resolvedPhoto != null && resolvedPhoto.isEmpty) {
         resolvedPhoto = null;
@@ -625,7 +659,8 @@ class AuthService {
   }) async {
     final user = _auth.currentUser;
     if (user == null) {
-      throw Exception('No authenticated user found. Please try Google sign-up again.');
+      throw Exception(
+          'No authenticated user found. Please try Google sign-up again.');
     }
 
     final email = user.email;
@@ -633,7 +668,8 @@ class AuthService {
       throw Exception('Google account has no email. Cannot set password.');
     }
 
-    final alreadyLinked = user.providerData.any((p) => p.providerId == 'password');
+    final alreadyLinked =
+        user.providerData.any((p) => p.providerId == 'password');
     if (alreadyLinked) {
       return;
     }
@@ -787,7 +823,8 @@ class AuthService {
     try {
       final normalizedEmail = email.trim().toLowerCase();
       final existing = await _firestore.collection('users').doc(user.uid).get();
-      final existingName = (existing.data()?['fullName'] as String?)?.trim() ?? '';
+      final existingName =
+          (existing.data()?['fullName'] as String?)?.trim() ?? '';
       final candidateFromInput = fullName.trim();
       final candidateFromAuth = (user.displayName ?? '').trim();
       final inputLooksEmail =
@@ -818,10 +855,9 @@ class AuthService {
           'email': normalizedEmail,
           'emailLower': normalizedEmail,
           'fullName': resolvedName,
-          'photoUrl':
-              (photoUrl != null && photoUrl.trim().isNotEmpty)
-                  ? photoUrl.trim()
-                  : user.photoURL,
+          'photoUrl': (photoUrl != null && photoUrl.trim().isNotEmpty)
+              ? photoUrl.trim()
+              : user.photoURL,
           'createdAt': DateTime.now(),
           'lastLogin': DateTime.now(),
           'isNewUser': isNewUser,
@@ -877,7 +913,8 @@ class AuthService {
   }
 
   // Re-authenticate an email/password user with their current password.
-  static Future<void> verifyCurrentPassword({required String currentPassword}) async {
+  static Future<void> verifyCurrentPassword(
+      {required String currentPassword}) async {
     final user = _auth.currentUser;
     if (user == null) {
       throw Exception('No authenticated user found.');
@@ -915,7 +952,8 @@ class AuthService {
   }
 
   // Update password for the currently authenticated user.
-  static Future<void> updateCurrentUserPassword({required String newPassword}) async {
+  static Future<void> updateCurrentUserPassword(
+      {required String newPassword}) async {
     final user = _auth.currentUser;
     if (user == null) {
       throw Exception('No authenticated user found.');
@@ -958,7 +996,8 @@ class AuthService {
       }
       // On some plugin versions, profile updates can succeed while a bridge
       // cast error is thrown afterwards. Continue with best-effort sync.
-      print('Ignoring known plugin bridge cast issue during profile update: $e');
+      print(
+          'Ignoring known plugin bridge cast issue during profile update: $e');
     }
 
     try {
@@ -1041,29 +1080,33 @@ class AuthService {
           final justCreated = user.metadata.creationTime != null &&
               user.metadata.lastSignInTime != null &&
               user.metadata.creationTime!
-                  .difference(user.metadata.lastSignInTime!)
-                  .inSeconds
-                  .abs() <=
-              10;
+                      .difference(user.metadata.lastSignInTime!)
+                      .inSeconds
+                      .abs() <=
+                  10;
           final resolved = localIsNewUser || justCreated;
           await prefs.setBool('isNewUser', resolved);
-          debugPrint('isNewUser: profile null, localIsNewUser=$localIsNewUser, justCreated=$justCreated, resolved=$resolved');
+          debugPrint(
+              'isNewUser: profile null, localIsNewUser=$localIsNewUser, justCreated=$justCreated, resolved=$resolved');
           return resolved;
         }
 
         final remoteIsNewUser = profile['isNewUser'] == true;
         final remoteOnboardingDone = profile['onboardingCompleted'] == true;
         final justCreated = _isJustCreatedUser(user);
-        final resolved =
-            remoteOnboardingDone ? false : (remoteIsNewUser || localIsNewUser || justCreated);
+        final resolved = remoteOnboardingDone
+            ? false
+            : (remoteIsNewUser || localIsNewUser || justCreated);
 
         await prefs.setBool('isNewUser', resolved);
         await prefs.setBool('onboardingCompleted', remoteOnboardingDone);
-        debugPrint('isNewUser: profile exists, remoteIsNewUser=$remoteIsNewUser, remoteOnboardingDone=$remoteOnboardingDone, justCreated=$justCreated, resolved=$resolved');
+        debugPrint(
+            'isNewUser: profile exists, remoteIsNewUser=$remoteIsNewUser, remoteOnboardingDone=$remoteOnboardingDone, justCreated=$justCreated, resolved=$resolved');
         return resolved;
       } catch (e) {
         // If we can't fetch remote profile, fall back to local state
-        debugPrint('isNewUser: Failed to fetch remote profile, using local flag. error=$e, localIsNewUser=$localIsNewUser');
+        debugPrint(
+            'isNewUser: Failed to fetch remote profile, using local flag. error=$e, localIsNewUser=$localIsNewUser');
         return localIsNewUser;
       }
     } catch (e) {
