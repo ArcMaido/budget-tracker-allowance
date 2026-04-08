@@ -205,18 +205,18 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
   ];
 
   static const List<Color> _categoryLineSeedColors = [
-    Color(0xFF1A7A59),
-    Color(0xFFE06C2F),
-    Color(0xFF2E7D32),
-    Color(0xFF1565C0),
-    Color(0xFF6A1B9A),
-    Color(0xFFAD1457),
-    Color(0xFF00897B),
-    Color(0xFFF4511E),
-    Color(0xFF3949AB),
-    Color(0xFF43A047),
-    Color(0xFFC62828),
-    Color(0xFF546E7A),
+    Color(0xFF006BA4),
+    Color(0xFFFF800E),
+    Color(0xFFABABAB),
+    Color(0xFF595959),
+    Color(0xFF5F9ED1),
+    Color(0xFFC85200),
+    Color(0xFF898989),
+    Color(0xFFA2C8EC),
+    Color(0xFFFFBC79),
+    Color(0xFFCFCFCF),
+    Color(0xFFB30000),
+    Color(0xFF7F3C8D),
   ];
 
   @override
@@ -312,20 +312,74 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
 
   Color _nextAvailableCategoryColor(Set<Color> used) {
     for (final seed in _categoryLineSeedColors) {
-      if (!used.contains(seed)) {
+      if (!used.contains(seed) && _isDistinctColor(seed, used)) {
         return seed;
       }
     }
 
+    const saturations = <double>[0.72, 0.62, 0.82];
+    const lightnesses = <double>[0.48, 0.40, 0.56];
     for (var i = 0; i < 360; i++) {
       final hue = ((used.length * 41) + (i * 37)) % 360;
-      final color = HSLColor.fromAHSL(1, hue.toDouble(), 0.67, 0.46).toColor();
-      if (!used.contains(color)) {
-        return color;
+      for (final saturation in saturations) {
+        for (final lightness in lightnesses) {
+          final color =
+              HSLColor.fromAHSL(1, hue.toDouble(), saturation, lightness)
+                  .toColor();
+          if (!used.contains(color) && _isDistinctColor(color, used)) {
+            return color;
+          }
+        }
       }
     }
 
-    return Colors.primaries[used.length % Colors.primaries.length];
+    Color best = Colors.primaries[used.length % Colors.primaries.length];
+    var bestScore = -1.0;
+    for (var i = 0; i < 360; i++) {
+      final hue = (i * 17) % 360;
+      final candidate =
+          HSLColor.fromAHSL(1, hue.toDouble(), 0.70, 0.46).toColor();
+      if (used.contains(candidate)) {
+        continue;
+      }
+      final score = _minDistanceToUsed(candidate, used);
+      if (score > bestScore) {
+        bestScore = score;
+        best = candidate;
+      }
+    }
+
+    return best;
+  }
+
+  bool _isDistinctColor(Color candidate, Set<Color> used,
+      {double minDistance = 90}) {
+    if (used.isEmpty) {
+      return true;
+    }
+    return used
+        .every((existing) => _colorDistance(candidate, existing) >= minDistance);
+  }
+
+  double _minDistanceToUsed(Color candidate, Set<Color> used) {
+    if (used.isEmpty) {
+      return double.infinity;
+    }
+    var minDistance = double.infinity;
+    for (final existing in used) {
+      final distance = _colorDistance(candidate, existing);
+      if (distance < minDistance) {
+        minDistance = distance;
+      }
+    }
+    return minDistance;
+  }
+
+  double _colorDistance(Color a, Color b) {
+    final dr = (a.red - b.red).toDouble();
+    final dg = (a.green - b.green).toDouble();
+    final db = (a.blue - b.blue).toDouble();
+    return math.sqrt((dr * dr) + (dg * dg) + (db * db));
   }
 
   Future<void> _save() async {
@@ -1260,29 +1314,38 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
     final monthTx = _data.transactions
         .where((tx) => _monthKey(tx.date) == effectiveLineMonth)
         .toList();
-    final weekDays = List<int>.generate(
-      selectedWeek.endDay - selectedWeek.startDay + 1,
-      (index) => selectedWeek.startDay + index,
-    );
+    final weekTx = monthTx
+        .where((tx) =>
+            tx.date.day >= selectedWeek.startDay &&
+            tx.date.day <= selectedWeek.endDay)
+        .toList();
 
     final lineSeries = selectedSeriesNames
         .map((name) {
-          final dayValues = weekDays
-              .map((day) => monthTx
-                  .where((tx) => tx.category == name && tx.date.day == day)
-                  .fold<double>(0, (sum, tx) => sum + tx.amount))
-              .toList();
-
-          if (dayValues.every((value) => value <= 0)) {
+          final categoryTx = weekTx
+              .where((tx) => tx.category == name)
+              .toList()
+            ..sort((a, b) => a.date.compareTo(b.date));
+          if (categoryTx.isEmpty) {
             return _LineSeries(name: name, values: const <double>[]);
           }
 
-          return _LineSeries(name: name, values: dayValues);
+          return _LineSeries(
+            name: name,
+            values: categoryTx.map((tx) => tx.amount).toList(),
+          );
         })
         .where((series) => series.values.isNotEmpty)
         .toList();
 
-    final lineLabels = weekDays.map((day) => day.toString()).toList();
+    final maxPointCount = lineSeries.fold<int>(
+      0,
+      (maxCount, series) => math.max(maxCount, series.values.length),
+    );
+    final lineLabels = List<String>.generate(
+      maxPointCount,
+      (index) => (index + 1).toString(),
+    );
     final lineColors = lineSeries
         .map(
             (s) => _categoryLineColors[s.name] ?? _categoryLineSeedColors.first)
@@ -1621,7 +1684,7 @@ class _ChartCard extends StatelessWidget {
         children: [
           Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
           const SizedBox(height: 10),
-          SizedBox(height: 220, child: child),
+          SizedBox(height: 300, child: child),
           if (footer != null) ...[
             const SizedBox(height: 10),
             footer!,
@@ -1637,6 +1700,25 @@ class _LineSeries {
 
   final String name;
   final List<double> values;
+
+  @override
+  bool operator ==(covariant _LineSeries other) {
+    if (identical(this, other)) return true;
+    return other.name == name &&
+        other.values.length == values.length &&
+        _listEquals(other.values, values);
+  }
+
+  @override
+  int get hashCode => Object.hash(name, Object.hashAll(values));
+
+  static bool _listEquals(List<double> a, List<double> b) {
+    if (a.length != b.length) return false;
+    for (int i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
 }
 
 class _WeekRange {
@@ -1912,19 +1994,27 @@ class _MonthlyLinePainter extends CustomPainter {
       final points = <Offset>[];
       final pointCount = line.values.length;
       for (var i = 0; i < pointCount; i++) {
-        final x = padLeft + (count > 1 ? i * xStep : chartW / 2);
         final value = line.values[i];
+        final x = padLeft + (count > 1 ? i * xStep : chartW / 2);
         final h = yMax > 0 ? (value / yMax) * chartH : 0.0;
         final y = padTop + chartH - h;
         points.add(Offset(x, y));
       }
 
       if (points.isNotEmpty) {
-        final path = Path()..moveTo(points.first.dx, points.first.dy);
-        for (var i = 1; i < points.length; i++) {
-          path.lineTo(points[i].dx, points[i].dy);
+        if (points.length == 1) {
+          final only = points.first;
+          final stemPath = Path()
+            ..moveTo(only.dx, padTop + chartH)
+            ..lineTo(only.dx, only.dy);
+          canvas.drawPath(stemPath, linePaint);
+        } else {
+          final path = Path()..moveTo(points.first.dx, points.first.dy);
+          for (var i = 1; i < points.length; i++) {
+            path.lineTo(points[i].dx, points[i].dy);
+          }
+          canvas.drawPath(path, linePaint);
         }
-        canvas.drawPath(path, linePaint);
       }
 
       for (final point in points) {
@@ -1946,7 +2036,21 @@ class _MonthlyLinePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _MonthlyLinePainter oldDelegate) {
-    return oldDelegate.series != series || oldDelegate.labels != labels;
+    if (oldDelegate.series.length != series.length ||
+        oldDelegate.labels.length != labels.length) {
+      return true;
+    }
+    for (int i = 0; i < series.length; i++) {
+      if (oldDelegate.series[i] != series[i]) {
+        return true;
+      }
+    }
+    for (int i = 0; i < labels.length; i++) {
+      if (oldDelegate.labels[i] != labels[i]) {
+        return true;
+      }
+    }
+    return false;
   }
 }
 
