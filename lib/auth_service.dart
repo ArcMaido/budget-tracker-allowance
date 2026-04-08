@@ -1125,11 +1125,11 @@ class AuthService {
       // Also update in Firebase
       final user = _auth.currentUser;
       if (user != null) {
-        await _firestore.collection('users').doc(user.uid).update({
+        await _firestore.collection('users').doc(user.uid).set({
           'isNewUser': false,
           'onboardingCompleted': true,
           'onboardingCompletedAt': DateTime.now(),
-        });
+        }, SetOptions(merge: true));
       }
     } catch (e) {
       print('Error completing onboarding: $e');

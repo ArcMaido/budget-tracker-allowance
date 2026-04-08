@@ -385,40 +385,58 @@ class _ProfilePageState extends State<ProfilePage> {
 
   void _showMessage(String message, {bool isSuccess = false}) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
+    final messenger = ScaffoldMessenger.of(context);
+    final bgColor = isSuccess ? const Color(0xFF166534) : const Color(0xFFB91C1C);
+    final fgColor = Colors.white;
+
+    messenger.removeCurrentSnackBar();
+    messenger.showSnackBar(
       SnackBar(
-        content: Text(message),
-        backgroundColor: isSuccess ? Colors.green : Colors.red,
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: bgColor,
+        elevation: 10,
         duration: const Duration(seconds: 3),
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        content: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+              isSuccess ? Icons.check_circle_rounded : Icons.error_outline_rounded,
+              color: fgColor,
+              size: 22,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    isSuccess ? 'Success' : 'Error',
+                    style: TextStyle(
+                      color: fgColor,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    message,
+                    style: TextStyle(color: fgColor.withValues(alpha: 0.95)),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 
   Future<void> _showSaveSuccessDialog() async {
     if (!mounted) return;
-    final scheme = Theme.of(context).colorScheme;
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Saved Successfully'),
-        content: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(Icons.check_circle, color: scheme.primary),
-            const SizedBox(width: 10),
-            const Expanded(
-              child: Text('Your profile details were saved successfully.'),
-            ),
-          ],
-        ),
-        actions: [
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    );
+    _showMessage('Your profile details were saved successfully.',
+        isSuccess: true);
   }
 
   @override

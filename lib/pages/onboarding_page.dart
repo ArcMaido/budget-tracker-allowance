@@ -6,7 +6,7 @@ class OnboardingPage extends StatefulWidget {
     required this.onComplete,
   });
 
-  final VoidCallback onComplete;
+  final Future<void> Function() onComplete;
 
   @override
   State<OnboardingPage> createState() => _OnboardingPageState();
@@ -23,7 +23,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
     setState(() => _finishing = true);
 
     try {
-      widget.onComplete();
+      await widget.onComplete();
     } catch (e) {
       if (!mounted) {
         return;

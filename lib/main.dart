@@ -14,6 +14,7 @@ import 'data_service.dart';
 import 'firebase_options.dart';
 import 'app_styles.dart';
 import 'pages/login_page.dart';
+import 'pages/onboarding_page.dart';
 import 'pages/profile_page.dart';
 
 part 'pages/dashboard_about_page.dart';
@@ -42,6 +43,13 @@ class _CoinzyAppState extends State<CoinzyApp> {
 
   void _toggleDarkMode(bool value) {
     setState(() => _isDarkMode = value);
+  }
+
+  Future<void> _completeOnboardingAndRefresh() async {
+    await AuthService.completeOnboarding();
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   @override
@@ -77,9 +85,27 @@ class _CoinzyAppState extends State<CoinzyApp> {
             );
           }
 
-          return AllowanceBudgetHome(
-            isDarkMode: _isDarkMode,
-            onToggleDarkMode: _toggleDarkMode,
+          return FutureBuilder<bool>(
+            future: AuthService.isNewUser(),
+            builder: (context, onboardingSnapshot) {
+              if (onboardingSnapshot.connectionState == ConnectionState.waiting) {
+                return const Scaffold(
+                  body: Center(child: CircularProgressIndicator()),
+                );
+              }
+
+              final needsOnboarding = onboardingSnapshot.data ?? false;
+              if (needsOnboarding) {
+                return OnboardingPage(
+                  onComplete: _completeOnboardingAndRefresh,
+                );
+              }
+
+              return AllowanceBudgetHome(
+                isDarkMode: _isDarkMode,
+                onToggleDarkMode: _toggleDarkMode,
+              );
+            },
           );
         },
       ),
@@ -294,6 +320,20 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
 
   Future<void> _logoutFromSettings() async {
     await AuthService.signOut();
+  }
+
+  String? _findCategoryKeyIgnoreCase(String input) {
+    final normalized = input.trim().toLowerCase();
+    if (normalized.isEmpty) {
+      return null;
+    }
+
+    for (final key in _data.categories.keys) {
+      if (key.toLowerCase() == normalized) {
+        return key;
+      }
+    }
+    return null;
   }
 
   void _syncCategoryLineColors() {
@@ -616,8 +656,12 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
   List<ExpenseTx> _filteredTransactions() {
     final query = _searchController.text.trim().toLowerCase();
     return _data.transactions.where((tx) {
-      if (query.isNotEmpty && !tx.title.toLowerCase().contains(query)) {
-        return false;
+      if (query.isNotEmpty) {
+        final titleMatch = tx.title.toLowerCase().contains(query);
+        final categoryMatch = tx.category.toLowerCase().contains(query);
+        if (!titleMatch && !categoryMatch) {
+          return false;
+        }
       }
       if (_filterCategory != 'all' && tx.category != _filterCategory) {
         return false;
@@ -633,7 +677,7 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
   Future<bool> _saveAllowance() async {
     final next = double.tryParse(_allowanceController.text.trim());
     if (next == null || next <= 0) {
-      _showHint('Enter a valid monthly allowance greater than 0.');
+      _showBasicSnack('Enter a valid monthly allowance greater than 0.');
       return false;
     }
     final selectedMonthKey = _monthKey(_allowanceMonth);
@@ -653,19 +697,26 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
         return true;
       }
 
-      await _showSuccessAlert(
-        title: 'Monthly Allowance Set',
-        message:
-            'Allowance for ${DateFormat('MMM yyyy').format(_allowanceMonth)} has been set successfully.',
+      _showBasicSnack(
+        'Allowance for ${DateFormat('MMM yyyy').format(_allowanceMonth)} has been set successfully.',
       );
       return true;
     } catch (e) {
       debugPrint('Error saving allowance: $e');
       if (mounted) {
-        _showHint('Error saving allowance: $e');
+        _showBasicSnack('Error saving allowance: $e');
       }
       return false;
     }
+  }
+
+  void _showBasicSnack(String text) {
+    if (!mounted) {
+      return;
+    }
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.removeCurrentSnackBar();
+    messenger.showSnackBar(SnackBar(content: Text(text)));
   }
 
   Future<void> _addExpense() async {
@@ -724,31 +775,31 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
       return;
     }
 
-    final existed = _data.categories.containsKey(name);
+    final existingKey = _findCategoryKeyIgnoreCase(name);
+    final targetKey = existingKey ?? name;
+    final existed = existingKey != null;
 
     try {
       setState(() {
-        _data.categories[name] = budget;
+        _data.categories[targetKey] = budget;
         _syncCategoryLineColors();
         _categoryNameController.clear();
         _categoryBudgetController.clear();
         if (!_data.categories.containsKey(_expenseCategory)) {
-          _expenseCategory = name;
+          _expenseCategory = targetKey;
         }
       });
 
-      await _save();
-
-      if (!mounted) {
-        return;
-      }
-
-      await _showSuccessAlert(
+      _showSweetNotification(
         title: existed ? 'Category Updated' : 'Category Added',
         message: existed
             ? 'Category updated successfully.'
             : 'Category added successfully.',
+        icon: Icons.check_circle_rounded,
+        backgroundColor: const Color(0xFF166534),
+        foregroundColor: Colors.white,
       );
+      unawaited(_saveWithHintOnError('saving category'));
     } catch (e) {
       debugPrint('Error upserting category: $e');
       if (mounted) {
@@ -764,33 +815,118 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
       return;
     }
 
-    if (!_data.categories.containsKey(name)) {
+    final targetKey = _findCategoryKeyIgnoreCase(name);
+    if (targetKey == null) {
       _showHint('Category not found.');
       return;
     }
 
     setState(() {
-      _data.categories.remove(name);
-      _categoryLineColors.remove(name);
+      _data.categories.remove(targetKey);
+      _categoryLineColors.remove(targetKey);
       _categoryNameController.clear();
       _categoryBudgetController.clear();
 
       final remaining = _data.categories.keys.toList()..sort();
-      if (_expenseCategory == name) {
+      if (_expenseCategory == targetKey) {
         _expenseCategory = remaining.isNotEmpty ? remaining.first : '';
       }
-      if (_filterCategory == name) {
+      if (_filterCategory == targetKey) {
         _filterCategory = 'all';
       }
-      if (_lineChartCategory == name) {
+      if (_lineChartCategory == targetKey) {
         _lineChartCategory = 'all';
       }
     });
-    await _save();
+    _showSweetNotification(
+      title: 'Category Removed',
+      message: 'Category removed successfully.',
+      icon: Icons.delete_outline_rounded,
+      backgroundColor: const Color(0xFF166534),
+      foregroundColor: Colors.white,
+    );
+    unawaited(_saveWithHintOnError('removing category'));
   }
 
   void _showHint(String text) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+    final scheme = Theme.of(context).colorScheme;
+    _showSweetNotification(
+      title: 'Notice',
+      message: text,
+      icon: Icons.info_outline_rounded,
+      backgroundColor: scheme.surfaceContainerHighest,
+      foregroundColor: scheme.onSurface,
+    );
+  }
+
+  void _showSweetNotification({
+    required String title,
+    required String message,
+    required IconData icon,
+    required Color backgroundColor,
+    required Color foregroundColor,
+    Duration duration = const Duration(seconds: 2),
+  }) {
+    if (!mounted) {
+      return;
+    }
+
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.removeCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: backgroundColor,
+        elevation: 10,
+        duration: duration,
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        content: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, color: foregroundColor, size: 22),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      color: foregroundColor,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    message,
+                    style: TextStyle(color: foregroundColor.withValues(alpha: 0.95)),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _saveWithHintOnError(String action) async {
+    try {
+      await _save();
+    } catch (e) {
+      if (mounted) {
+        _showSweetNotification(
+          title: 'Save Failed',
+          message: 'Error $action: $e',
+          icon: Icons.error_outline_rounded,
+          backgroundColor: const Color(0xFFB91C1C),
+          foregroundColor: Colors.white,
+          duration: const Duration(seconds: 3),
+        );
+      }
+    }
   }
 
   void _runState(VoidCallback action) {
