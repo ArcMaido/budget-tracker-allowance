@@ -207,19 +207,6 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
-  Future<void> _signInWithGoogle() async {
-    if (_isLoading || _isLockedOut) return;
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => SignupPage(
-          isDarkMode: widget.isDarkMode,
-          onToggleDarkMode: widget.onToggleDarkMode,
-          autoStartGoogleSignup: true,
-        ),
-      ),
-    );
-  }
-
   Future<void> _openForgotPassword() async {
     if (_isLoading || _isLockedOut) return;
     await Navigator.of(context).push(
@@ -362,12 +349,6 @@ class _LoginPageState extends State<LoginPage> {
                                         ? 'Locked ($_lockoutSecondsRemaining)'
                                         : 'Sign In',
                                   ),
-                          ),
-                          const SizedBox(height: 10),
-                          OutlinedButton.icon(
-                            onPressed: _isLoading || _isLockedOut ? null : _signInWithGoogle,
-                            icon: const Icon(Icons.g_mobiledata_rounded, size: 28),
-                            label: const Text('Create account with Google'),
                           ),
                         ],
                       ),

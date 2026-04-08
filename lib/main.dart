@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:country_flags/country_flags.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -10,13 +9,11 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'app_styles.dart';
 import 'auth_service.dart';
 import 'data_service.dart';
 import 'firebase_options.dart';
+import 'app_styles.dart';
 import 'pages/login_page.dart';
-import 'pages/started_page.dart';
-import 'pages/onboarding_page.dart';
 import 'pages/profile_page.dart';
 
 part 'pages/dashboard_about_page.dart';
@@ -25,385 +22,74 @@ part 'pages/dashboard_expenses_page.dart';
 part 'pages/dashboard_history_page.dart';
 part 'pages/dashboard_monthly_page.dart';
 
-void main() async {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
-
-  runApp(const AllowanceBudgetApp());
+  runApp(const CoinzyApp());
 }
 
-class AllowanceBudgetApp extends StatefulWidget {
-  const AllowanceBudgetApp({super.key});
+class CoinzyApp extends StatefulWidget {
+  const CoinzyApp({super.key});
 
   @override
-  State<AllowanceBudgetApp> createState() => _AllowanceBudgetAppState();
+  State<CoinzyApp> createState() => _CoinzyAppState();
 }
 
-class _AllowanceBudgetAppState extends State<AllowanceBudgetApp> {
-  bool _darkMode = false;
-  bool _showGetStarted = true;
+class _CoinzyAppState extends State<CoinzyApp> {
+  bool _isDarkMode = false;
 
-  @override
-  void initState() {
-    super.initState();
-    _loadDarkMode();
-  }
-
-  Future<void> _loadDarkMode() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      _darkMode = prefs.getBool('dark_mode') ?? false;
-    });
-  }
-
-  Future<void> _setDarkMode(bool enabled) async {
-    setState(() => _darkMode = enabled);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('dark_mode', enabled);
+  void _toggleDarkMode(bool value) {
+    setState(() => _isDarkMode = value);
   }
 
   @override
   Widget build(BuildContext context) {
-    const lightScheme = ColorScheme(
-      brightness: Brightness.light,
-      primary: Color(0xFF1A7A59),
-      onPrimary: Color(0xFFFFFFFF),
-      secondary: Color(0xFF4F6358),
-      onSecondary: Color(0xFFFFFFFF),
-      error: Color(0xFFBA1A1A),
-      onError: Color(0xFFFFFFFF),
-      surface: Color(0xFFF7FAF8),
-      onSurface: Color(0xFF16201B),
-      outline: Color(0xFF717D75),
-    );
-    const darkScheme = ColorScheme(
-      brightness: Brightness.dark,
-      primary: Color(0xFF7EDDB9),
-      onPrimary: Color(0xFF003826),
-      secondary: Color(0xFFB5CCBE),
-      onSecondary: Color(0xFF21352C),
-      error: Color(0xFFFFB4AB),
-      onError: Color(0xFF690005),
-      surface: Color(0xFF0F1613),
-      onSurface: Color(0xFFDDE5DF),
-      outline: Color(0xFF8B978F),
-    );
-
-    final base = ThemeData(
-      useMaterial3: true,
-      colorScheme: lightScheme,
-      fontFamily: 'Segoe UI',
-    );
-    final darkBase = ThemeData(
-      useMaterial3: true,
-      colorScheme: darkScheme,
-      fontFamily: 'Segoe UI',
-    );
-
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'Coinzy',
-      themeAnimationDuration: const Duration(milliseconds: 280),
-      themeAnimationCurve: Curves.easeInOutCubic,
-      themeMode: _darkMode ? ThemeMode.dark : ThemeMode.light,
-      theme: base.copyWith(
-        scaffoldBackgroundColor: lightScheme.surface,
-        cardTheme: const CardThemeData(
-          color: Colors.white,
-          elevation: 0,
-          margin: EdgeInsets.zero,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.all(Radius.circular(16)),
-            side: BorderSide(color: Color(0xFFD8E3DC)),
-          ),
-        ),
-        dividerColor: const Color(0xFFE5ECE7),
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: const Color(0xFFFBFDFC),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: Color(0xFFD5E0D8)),
-          ),
+      themeMode: _isDarkMode ? ThemeMode.dark : ThemeMode.light,
+      theme: ThemeData(
+        useMaterial3: true,
+        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1A7A59)),
+      ),
+      darkTheme: ThemeData(
+        useMaterial3: true,
+        brightness: Brightness.dark,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF1A7A59),
+          brightness: Brightness.dark,
         ),
       ),
-      darkTheme: darkBase.copyWith(
-        scaffoldBackgroundColor: darkScheme.surface,
-        cardTheme: const CardThemeData(
-          color: Color(0xFF17201C),
-          elevation: 0,
-          margin: EdgeInsets.zero,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.all(Radius.circular(16)),
-            side: BorderSide(color: Color(0xFF2D3933)),
-          ),
-        ),
-        dividerColor: const Color(0xFF31403A),
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: const Color(0xFF121A17),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: Color(0xFF304039)),
-          ),
-        ),
+      home: StreamBuilder<User?>(
+        stream: FirebaseAuth.instance.authStateChanges(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Scaffold(
+              body: Center(child: CircularProgressIndicator()),
+            );
+          }
+
+          if (snapshot.data == null) {
+            return LoginPage(
+              isDarkMode: _isDarkMode,
+              onToggleDarkMode: _toggleDarkMode,
+            );
+          }
+
+          return AllowanceBudgetHome(
+            isDarkMode: _isDarkMode,
+            onToggleDarkMode: _toggleDarkMode,
+          );
+        },
       ),
-      home: _showGetStarted
-          ? GetStartedPage(
-              onGetStarted: () {
-                if (mounted) {
-                  setState(() => _showGetStarted = false);
-                }
-              },
-            )
-          : _buildAuthFlow(),
-    );
-  }
-
-  Widget _buildAuthFlow() {
-    return StreamBuilder<User?>(
-      stream: AuthService.authStateChanges(),
-      initialData: AuthService.currentUser,
-      builder: (context, snapshot) {
-        final activeUser = snapshot.data ?? AuthService.currentUser;
-
-        if (activeUser == null) {
-          return LoginPage(
-            isDarkMode: _darkMode,
-            onToggleDarkMode: _setDarkMode,
-            onSignedIn: () {
-              if (mounted) {
-                setState(() {});
-              }
-            },
-          );
-        }
-
-        return UserAuthWrapper(
-          key: ValueKey<String>(activeUser.uid),
-          isDarkMode: _darkMode,
-          onToggleDarkMode: _setDarkMode,
-        );
-      },
     );
   }
 }
 
-class UserAuthWrapper extends StatefulWidget {
-  const UserAuthWrapper({
-    super.key,
-    required this.isDarkMode,
-    required this.onToggleDarkMode,
-  });
+/*
 
-  final bool isDarkMode;
-  final ValueChanged<bool> onToggleDarkMode;
-
-  @override
-  State<UserAuthWrapper> createState() => _UserAuthWrapperState();
-}
-
-class _UserAuthWrapperState extends State<UserAuthWrapper>
-    with WidgetsBindingObserver {
-  bool _showOnboarding = false;
-  bool _isLoading = true;
-  StreamSubscription<User?>? _authSub;
-  Timer? _accountHealthTimer;
-  bool _accountDeletedDialogOpen = false;
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addObserver(this);
-    _authSub = FirebaseAuth.instance.authStateChanges().listen((_) {
-      if (mounted) {
-        setState(() => _isLoading = true);
-      }
-      _checkOnboardingStatus();
-    });
-    _accountHealthTimer = Timer.periodic(const Duration(seconds: 8), (_) {
-      _checkOnboardingStatus();
-    });
-    _checkOnboardingStatus();
-  }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    _authSub?.cancel();
-    _accountHealthTimer?.cancel();
-    super.dispose();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      _checkOnboardingStatus();
-    }
-  }
-
-  Future<void> _checkOnboardingStatus() async {
-    try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user != null) {
-        final accountDeleted = await _handleDeletedAccountIfNeeded(user);
-        if (accountDeleted) {
-          if (mounted) {
-            setState(() => _isLoading = false);
-          }
-          return;
-        }
-
-        // Retry with increased delays to allow Firestore replication to complete.
-        // This ensures that on first login after signup, we properly detect the new user status.
-        var isNewUser = false;
-        for (var attempt = 0; attempt < 6; attempt++) {
-          if (attempt > 0) {
-            await Future.delayed(const Duration(milliseconds: 500));
-          }
-          isNewUser = await AuthService.isNewUser().timeout(
-            const Duration(seconds: 4),
-            onTimeout: () {
-              debugPrint(
-                  'Onboarding check attempt $attempt timed out; using fallback=false');
-              return false;
-            },
-          );
-          debugPrint('Onboarding check attempt $attempt: isNewUser=$isNewUser');
-          if (isNewUser) {
-            break;
-          }
-        }
-        if (mounted) {
-          setState(() {
-            _showOnboarding = isNewUser;
-            _isLoading = false;
-          });
-        }
-      } else {
-        if (mounted) {
-          setState(() => _isLoading = false);
-        }
-      }
-    } catch (e) {
-      debugPrint('Error checking onboarding status: $e');
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
-    }
-  }
-
-  void _completeOnboarding() {
-    AuthService.completeOnboarding();
-    setState(() => _showOnboarding = false);
-  }
-
-  Future<bool> _handleDeletedAccountIfNeeded(User user) async {
-    try {
-      final existsRemotely =
-          await AuthService.verifyCurrentUserStillExistsRemotely();
-      if (!existsRemotely) {
-        await _showDeletedAccountDialog();
-        return true;
-      }
-
-      await user.getIdToken(true);
-      await user.reload();
-
-      final refreshed = FirebaseAuth.instance.currentUser;
-      if (refreshed == null) {
-        await _showDeletedAccountDialog();
-        return true;
-      }
-
-      final email = (refreshed.email ?? '').trim();
-      if (email.isNotEmpty) {
-        final methods =
-            await FirebaseAuth.instance.fetchSignInMethodsForEmail(email);
-        if (methods.isEmpty) {
-          await _showDeletedAccountDialog();
-          return true;
-        }
-      }
-
-      final profileDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(refreshed.uid)
-          .get();
-      if (!profileDoc.exists) {
-        await _showDeletedAccountDialog();
-        return true;
-      }
-
-      return false;
-    } on FirebaseAuthException catch (e) {
-      final isDeleted = e.code == 'user-not-found' ||
-          e.code == 'user-token-expired' ||
-          e.code == 'invalid-user-token' ||
-          e.code == 'invalid-credential';
-      if (!isDeleted) {
-        return false;
-      }
-      await _showDeletedAccountDialog();
-      return true;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  Future<void> _showDeletedAccountDialog() async {
-    if (!mounted || _accountDeletedDialogOpen) {
-      return;
-    }
-    _accountDeletedDialogOpen = true;
-    await showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text('Account Deleted'),
-          content: const Text(
-            'This account was deleted from Firebase. Please log in again or create a new account.',
-          ),
-          actions: [
-            FilledButton(
-              onPressed: () async {
-                await AuthService.signOut();
-                if (dialogContext.mounted) {
-                  Navigator.of(dialogContext).pop();
-                }
-              },
-              child: const Text('Go to Login'),
-            ),
-          ],
-        );
-      },
-    );
-    _accountDeletedDialogOpen = false;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (_isLoading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
-    }
-
-    if (_showOnboarding) {
-      return OnboardingPage(
-        onComplete: _completeOnboarding,
-      );
-    }
-
-    return AllowanceBudgetHome(
-      isDarkMode: widget.isDarkMode,
-      onToggleDarkMode: widget.onToggleDarkMode,
-    );
-  }
-}
+*/
 
 class AllowanceBudgetHome extends StatefulWidget {
   const AllowanceBudgetHome({
@@ -481,6 +167,8 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
   String _filterCategory = 'all';
   String _filterMonth = 'all';
   String _lineChartCategory = 'all';
+  String _lineChartMonth = DateFormat('yyyy-MM').format(DateTime.now());
+  int _lineChartWeek = 1;
   final Map<String, Color> _categoryLineColors = <String, Color>{};
   String _summaryPeriod = 'month';
   int _summaryYear = DateTime.now().year;
@@ -488,7 +176,7 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
   int _summaryStartDay = 1;
   int _monthlyRowsPerPage = 8;
   int _monthlyPage = 0;
-  final int _historyRowsPerPage = 10;
+  int _historyRowsPerPage = 10;
   int _historyPage = 0;
   bool _monthlyShowAllowance = true;
   bool _monthlyShowSpent = true;
@@ -935,6 +623,29 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
       return;
     }
 
+    final expenseMonthKey = _monthKey(_expenseDate);
+    final categoryBudget = _data.categories[category] ?? 0;
+    if (categoryBudget > 0) {
+      final currentCategorySpent = _data.transactions
+          .where((tx) =>
+              tx.category == category && _monthKey(tx.date) == expenseMonthKey)
+          .fold<double>(0, (sum, tx) => sum + tx.amount);
+      final projectedSpent = currentCategorySpent + amount;
+
+      if (projectedSpent > categoryBudget) {
+        final shouldContinue = await _showCategoryBudgetWarning(
+          category: category,
+          budget: categoryBudget,
+          currentSpent: currentCategorySpent,
+          nextAmount: amount,
+          monthKey: expenseMonthKey,
+        );
+        if (!shouldContinue) {
+          return;
+        }
+      }
+    }
+
     final tx = ExpenseTx(
       id: '${DateTime.now().microsecondsSinceEpoch}',
       title: title,
@@ -1084,6 +795,77 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
         );
       }
     }
+  }
+
+  Future<bool> _showCategoryBudgetWarning({
+    required String category,
+    required double budget,
+    required double currentSpent,
+    required double nextAmount,
+    required String monthKey,
+  }) async {
+    if (!mounted) {
+      return false;
+    }
+
+    final projected = currentSpent + nextAmount;
+    final overBy = projected - budget;
+
+    final decision = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        final scheme = Theme.of(dialogContext).colorScheme;
+        return AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          title: Row(
+            children: [
+              Icon(Icons.warning_amber_rounded, color: scheme.error),
+              const SizedBox(width: 8),
+              const Expanded(child: Text('Category Budget Warning')),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'This expense exceeds your $category budget for ${_monthLabel(monthKey)}.',
+              ),
+              const SizedBox(height: 10),
+              Text('Budget: ${_money(budget)}'),
+              Text('Current spent: ${_money(currentSpent)}'),
+              Text('New expense: ${_money(nextAmount)}'),
+              const SizedBox(height: 6),
+              Text(
+                'Projected spent: ${_money(projected)} (${_money(overBy)} over)',
+                style: TextStyle(
+                  color: scheme.error,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            OutlinedButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              style: FilledButton.styleFrom(
+                backgroundColor: scheme.error,
+                foregroundColor: scheme.onError,
+              ),
+              child: const Text('Continue'),
+            ),
+          ],
+        );
+      },
+    );
+
+    return decision ?? false;
   }
 
   void _openSettingsPage() {
@@ -1428,34 +1210,79 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
 
   Widget _buildVisualsSection() {
     final months = _recentMonths(12).reversed.toList();
-    final values = months
+    final barValues = months
         .map((month) => _data.transactions
             .where((tx) => _monthKey(tx.date) == month)
             .fold<double>(0, (sum, tx) => sum + tx.amount))
         .toList();
-    final labels = months.map((m) => _monthLabel(m).split(' ').first).toList();
+    final monthLabels =
+        months.map((m) => _monthLabel(m).split(' ').first).toList();
 
     final categories = _data.categories.keys.toList()..sort();
     final effectiveLineCategory =
         categories.contains(_lineChartCategory) ? _lineChartCategory : 'all';
-    final selectedCategories =
-        effectiveLineCategory == 'all' ? categories : [effectiveLineCategory];
+    final monthOptions = _recentMonths(12);
+    final effectiveLineMonth = monthOptions.contains(_lineChartMonth)
+        ? _lineChartMonth
+        : _nowMonthKey();
 
-    final lineSeries = selectedCategories
-        .map(
-          (name) => _LineSeries(
-            name: name,
-            values: months
-                .map(
-                  (month) => _data.transactions
-                      .where((tx) =>
-                          _monthKey(tx.date) == month && tx.category == name)
-                      .fold<double>(0, (sum, tx) => sum + tx.amount),
-                )
-                .toList(),
-          ),
-        )
+    final monthParts = effectiveLineMonth.split('-');
+    final lineYear = int.tryParse(monthParts.first) ?? DateTime.now().year;
+    final lineMonth = monthParts.length > 1
+        ? int.tryParse(monthParts[1]) ?? DateTime.now().month
+        : DateTime.now().month;
+    final daysInLineMonth = DateTime(lineYear, lineMonth + 1, 0).day;
+    final weekCount = ((daysInLineMonth - 1) ~/ 7) + 1;
+    final weekRanges = List<_WeekRange>.generate(weekCount, (index) {
+      final weekNumber = index + 1;
+      final startDay = (index * 7) + 1;
+      final endDay = math.min(startDay + 6, daysInLineMonth);
+      final startDate = DateTime(lineYear, lineMonth, startDay);
+      final endDate = DateTime(lineYear, lineMonth, endDay);
+      return _WeekRange(
+        weekNumber: weekNumber,
+        startDay: startDay,
+        endDay: endDay,
+        label:
+            'Week $weekNumber: ${DateFormat('MMM d').format(startDate)} - ${DateFormat('d').format(endDate)}',
+      );
+    });
+    final effectiveLineWeek =
+        weekRanges.any((week) => week.weekNumber == _lineChartWeek)
+            ? _lineChartWeek
+            : 1;
+    final selectedWeek =
+        weekRanges.firstWhere((week) => week.weekNumber == effectiveLineWeek);
+
+    final selectedSeriesNames = effectiveLineCategory == 'all'
+        ? categories
+        : <String>[effectiveLineCategory];
+    final monthTx = _data.transactions
+        .where((tx) => _monthKey(tx.date) == effectiveLineMonth)
         .toList();
+    final weekDays = List<int>.generate(
+      selectedWeek.endDay - selectedWeek.startDay + 1,
+      (index) => selectedWeek.startDay + index,
+    );
+
+    final lineSeries = selectedSeriesNames
+        .map((name) {
+          final dayValues = weekDays
+              .map((day) => monthTx
+                  .where((tx) => tx.category == name && tx.date.day == day)
+                  .fold<double>(0, (sum, tx) => sum + tx.amount))
+              .toList();
+
+          if (dayValues.every((value) => value <= 0)) {
+            return _LineSeries(name: name, values: const <double>[]);
+          }
+
+          return _LineSeries(name: name, values: dayValues);
+        })
+        .where((series) => series.values.isNotEmpty)
+        .toList();
+
+    final lineLabels = weekDays.map((day) => day.toString()).toList();
     final lineColors = lineSeries
         .map(
             (s) => _categoryLineColors[s.name] ?? _categoryLineSeedColors.first)
@@ -1477,10 +1304,66 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
               builder: (context, constraints) {
                 final chartA = _ChartCard(
                   title: '12-Month Spending (Bar)',
-                  child: MonthlyBarChart(values: values, labels: labels),
+                  child:
+                      MonthlyBarChart(values: barValues, labels: monthLabels),
                 );
                 final chartB = _ChartCard(
-                  title: '12-Month Spending (Line graph)',
+                  title: 'Weekly Spending Trend (Line graph)',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Align(
+                        alignment: Alignment.center,
+                        child: PopupMenuButton<int>(
+                          onSelected: (value) {
+                            setState(() => _lineChartWeek = value);
+                          },
+                          itemBuilder: (context) => weekRanges
+                              .map(
+                                (week) => PopupMenuItem<int>(
+                                  value: week.weekNumber,
+                                  child: Text(week.label,
+                                      overflow: TextOverflow.ellipsis),
+                                ),
+                              )
+                              .toList(),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              border: Border.all(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .outlineVariant),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.calendar_view_week_outlined,
+                                    size: 18),
+                                const SizedBox(width: 6),
+                                Text(selectedWeek.label),
+                                const SizedBox(width: 4),
+                                const Icon(Icons.arrow_drop_down, size: 18),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          child: MonthlyLineChart(
+                            series: lineSeries,
+                            labels: lineLabels,
+                            lineColors: lineColors,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                   footer: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -1501,37 +1384,59 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
                           }),
                         ),
                       const SizedBox(height: 8),
-                      SizedBox(
-                        width: 180,
-                        child: DropdownButton<String>(
-                          isExpanded: true,
-                          value: effectiveLineCategory,
-                          onChanged: (value) {
-                            if (value != null) {
-                              setState(() => _lineChartCategory = value);
-                            }
-                          },
-                          items: [
-                            const DropdownMenuItem(
-                              value: 'all',
-                              child: Text('All Categories'),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: DropdownButton<String>(
+                              isExpanded: true,
+                              value: effectiveLineMonth,
+                              onChanged: (value) {
+                                if (value != null) {
+                                  setState(() {
+                                    _lineChartMonth = value;
+                                    _lineChartWeek = 1;
+                                  });
+                                }
+                              },
+                              items: monthOptions
+                                  .map(
+                                    (month) => DropdownMenuItem(
+                                      value: month,
+                                      child: Text(_monthLabel(month)),
+                                    ),
+                                  )
+                                  .toList(),
                             ),
-                            ...categories.map(
-                              (name) => DropdownMenuItem(
-                                value: name,
-                                child:
-                                    Text(name, overflow: TextOverflow.ellipsis),
-                              ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: DropdownButton<String>(
+                              isExpanded: true,
+                              value: effectiveLineCategory,
+                              onChanged: (value) {
+                                if (value != null) {
+                                  setState(() => _lineChartCategory = value);
+                                }
+                              },
+                              items: [
+                                const DropdownMenuItem(
+                                  value: 'all',
+                                  child: Text('All Categories'),
+                                ),
+                                ...categories.map(
+                                  (name) => DropdownMenuItem(
+                                    value: name,
+                                    child: Text(name,
+                                        overflow: TextOverflow.ellipsis),
+                                  ),
+                                ),
+                              ],
                             ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
-                  child: MonthlyLineChart(
-                      series: lineSeries,
-                      labels: labels,
-                      lineColors: lineColors),
                 );
 
                 if (constraints.maxWidth < 900) {
@@ -1691,7 +1596,11 @@ class _PeriodSummaryRow {
 }
 
 class _ChartCard extends StatelessWidget {
-  const _ChartCard({required this.title, required this.child, this.footer});
+  const _ChartCard({
+    required this.title,
+    required this.child,
+    this.footer,
+  });
 
   final String title;
   final Widget child;
@@ -1728,6 +1637,20 @@ class _LineSeries {
 
   final String name;
   final List<double> values;
+}
+
+class _WeekRange {
+  const _WeekRange({
+    required this.weekNumber,
+    required this.startDay,
+    required this.endDay,
+    required this.label,
+  });
+
+  final int weekNumber;
+  final int startDay;
+  final int endDay;
+  final String label;
 }
 
 class MonthlyBarChart extends StatelessWidget {
@@ -1779,14 +1702,15 @@ class _MonthlyBarPainter extends CustomPainter {
     if (values.isEmpty) {
       return;
     }
-    const padLeft = 18.0;
-    const padRight = 44.0;
+    const padLeft = 40.0;
+    const padRight = 16.0;
     const padTop = 14.0;
     const padBottom = 30.0;
     final chartW = size.width - padLeft - padRight;
     final chartH = size.height - padTop - padBottom;
     final maxValue = values.fold<double>(1, (m, v) => math.max(m, v));
-    final yMax = math.max(1000.0, (maxValue / 1000.0).ceil() * 1000.0);
+    const yStep = 1000.0;
+    final yMax = math.max(3000.0, (maxValue / yStep).ceil() * yStep);
 
     final axisPaint = Paint()
       ..color = axisColor
@@ -1802,7 +1726,7 @@ class _MonthlyBarPainter extends CustomPainter {
       axisPaint,
     );
 
-    for (var tick = 1000.0; tick <= yMax; tick += 1000.0) {
+    for (var tick = yStep; tick <= yMax; tick += yStep) {
       final y = padTop + chartH - ((tick / yMax) * chartH);
       canvas.drawLine(
           Offset(padLeft, y), Offset(size.width - padRight, y), gridPaint);
@@ -1810,10 +1734,13 @@ class _MonthlyBarPainter extends CustomPainter {
         text: TextSpan(
             text: tick.toInt().toString(),
             style: TextStyle(color: valueColor, fontSize: 10)),
+        maxLines: 1,
         textDirection: TextDirection.ltr,
-      )..layout(maxWidth: padRight - 4);
-      valuePainter.paint(canvas,
-          Offset(size.width - padRight + 4, y - (valuePainter.height / 2)));
+      )..layout(maxWidth: padLeft - 12);
+      valuePainter.paint(
+          canvas,
+          Offset(
+              padLeft - valuePainter.width - 6, y - (valuePainter.height / 2)));
     }
 
     final count = values.length;
@@ -1914,8 +1841,8 @@ class _MonthlyLinePainter extends CustomPainter {
       return;
     }
 
-    const padLeft = 18.0;
-    const padRight = 44.0;
+    const padLeft = 40.0;
+    const padRight = 16.0;
     const padTop = 14.0;
     const padBottom = 30.0;
     final chartW = size.width - padLeft - padRight;
@@ -1928,7 +1855,8 @@ class _MonthlyLinePainter extends CustomPainter {
         }
       }
     }
-    final yMax = math.max(300.0, (maxValue / 100.0).ceil() * 100.0);
+    const yStep = 250.0;
+    final yMax = math.max(yStep, (maxValue / yStep).ceil() * yStep);
 
     final axisPaint = Paint()
       ..color = axisColor
@@ -1943,7 +1871,7 @@ class _MonthlyLinePainter extends CustomPainter {
       axisPaint,
     );
 
-    for (var tick = 100.0; tick <= yMax; tick += 100.0) {
+    for (var tick = yStep; tick <= yMax; tick += yStep) {
       final y = padTop + chartH - ((tick / yMax) * chartH);
       canvas.drawLine(
           Offset(padLeft, y), Offset(size.width - padRight, y), gridPaint);
@@ -1951,10 +1879,13 @@ class _MonthlyLinePainter extends CustomPainter {
         text: TextSpan(
             text: tick.toInt().toString(),
             style: TextStyle(color: valueColor, fontSize: 10)),
+        maxLines: 1,
         textDirection: TextDirection.ltr,
-      )..layout(maxWidth: padRight - 4);
-      valuePainter.paint(canvas,
-          Offset(size.width - padRight + 4, y - (valuePainter.height / 2)));
+      )..layout(maxWidth: padLeft - 12);
+      valuePainter.paint(
+          canvas,
+          Offset(
+              padLeft - valuePainter.width - 6, y - (valuePainter.height / 2)));
     }
 
     final count = labels.length;
@@ -1970,11 +1901,19 @@ class _MonthlyLinePainter extends CustomPainter {
         ..color = lineColors[lineIndex % lineColors.length]
         ..strokeWidth = 2.8
         ..style = PaintingStyle.stroke;
+      final pointFillPaint = Paint()
+        ..color = lineColors[lineIndex % lineColors.length]
+        ..style = PaintingStyle.fill;
+      final pointStrokePaint = Paint()
+        ..color = Colors.white
+        ..strokeWidth = 1.2
+        ..style = PaintingStyle.stroke;
 
       final points = <Offset>[];
-      for (var i = 0; i < count; i++) {
+      final pointCount = line.values.length;
+      for (var i = 0; i < pointCount; i++) {
         final x = padLeft + (count > 1 ? i * xStep : chartW / 2);
-        final value = i < line.values.length ? line.values[i] : 0.0;
+        final value = line.values[i];
         final h = yMax > 0 ? (value / yMax) * chartH : 0.0;
         final y = padTop + chartH - h;
         points.add(Offset(x, y));
@@ -1986,6 +1925,11 @@ class _MonthlyLinePainter extends CustomPainter {
           path.lineTo(points[i].dx, points[i].dy);
         }
         canvas.drawPath(path, linePaint);
+      }
+
+      for (final point in points) {
+        canvas.drawCircle(point, 3.2, pointFillPaint);
+        canvas.drawCircle(point, 3.2, pointStrokePaint);
       }
     }
 

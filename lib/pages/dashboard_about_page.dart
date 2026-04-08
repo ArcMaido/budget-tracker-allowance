@@ -2,10 +2,61 @@ part of '../main.dart';
 
 extension _DashboardAboutSection on _AllowanceBudgetHomeState {
   Widget _buildAboutCard() {
+    IconData roleIconFor(String role) {
+      final normalized = role.toLowerCase();
+      if (normalized.contains('backend')) {
+        return Icons.storage_outlined;
+      }
+      if (normalized.contains('frontend')) {
+        return Icons.language_outlined;
+      }
+      if (normalized.contains('leader') || normalized.contains('lead')) {
+        return Icons.emoji_events_outlined;
+      }
+      if (normalized.contains('design')) {
+        return Icons.palette_outlined;
+      }
+      if (normalized.contains('qa')) {
+        return Icons.fact_check_outlined;
+      }
+      return Icons.badge_outlined;
+    }
+
+    Widget buildRoleBadge(String role) {
+      final colors = Theme.of(context).colorScheme;
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: colors.primary.withValues(alpha: 0.35)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              roleIconFor(role),
+              size: 14,
+              color: colors.primary,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              role,
+              style: TextStyle(
+                fontWeight: FontWeight.w600,
+                fontSize: 12,
+                color: colors.primary,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     const developers = [
       (
         name: 'Jim Agustin Maido',
-        role: 'Project Lead',
+        role: 'Backend Developer',
       ),
       (
         name: 'Joshua Tordecilla',
@@ -13,21 +64,21 @@ extension _DashboardAboutSection on _AllowanceBudgetHomeState {
       ),
       (
         name: 'John Reb Alonzo',
-        role: 'Feature Developer',
+        role: 'Project Leader',
       ),
       (
         name: 'Rein Irish Santos',
-        role: 'UX Contributor',
+        role: 'UI/UX Designer',
       ),
       (
         name: 'Justin Simangan',
-        role: 'Data & Logic Developer',
+        role: 'UI/UX Designer',
       ),
     ];
 
     const specialGuest = (
       name: 'Piolo Labios',
-      role: 'Special Guest',
+      role: 'QA and Frontend Designing',
     );
 
     return Card(
@@ -80,8 +131,12 @@ extension _DashboardAboutSection on _AllowanceBudgetHomeState {
               },
             ),
             const SizedBox(height: 12),
-            const Text('Developers',
-                style: TextStyle(fontWeight: FontWeight.w700)),
+            const Center(
+              child: Text(
+                'Developers',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 18),
+              ),
+            ),
             const SizedBox(height: 6),
             ...developers.map(
               (dev) => Padding(
@@ -97,36 +152,31 @@ extension _DashboardAboutSection on _AllowanceBudgetHomeState {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    Text(
-                      dev.role,
-                      style: TextStyle(
-                        fontWeight: FontWeight.w600,
-                        color: Theme.of(context).colorScheme.primary,
-                      ),
-                    ),
+                    buildRoleBadge(dev.role),
                   ],
                 ),
               ),
             ),
             const SizedBox(height: 10),
-            const Text('Special Thanks',
-                style: TextStyle(fontWeight: FontWeight.w700)),
+            const Center(
+              child: Text(
+                'Special Thanks',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 18),
+              ),
+            ),
             const SizedBox(height: 6),
             Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(
-                  Icons.star_outline,
-                  size: 18,
-                  color: Theme.of(context).colorScheme.primary,
-                ),
-                const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    '${specialGuest.name} (${specialGuest.role})',
+                    specialGuest.name,
                     style: const TextStyle(fontWeight: FontWeight.w700),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
+                const SizedBox(width: 8),
+                buildRoleBadge(specialGuest.role),
               ],
             ),
           ],
