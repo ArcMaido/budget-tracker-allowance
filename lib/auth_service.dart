@@ -905,7 +905,19 @@ class AuthService {
   // Reset password
   static Future<void> resetPassword({required String email}) async {
     try {
-      await _auth.sendPasswordResetEmail(email: email.trim());
+      final normalizedEmail = email.trim();
+      if (normalizedEmail.isEmpty) {
+        throw Exception('Enter a valid email address.');
+      }
+
+      final accountExists = await doesAccountExist(normalizedEmail);
+      if (!accountExists) {
+        throw Exception(
+          'No account found for this email address. Please check the email and try again.',
+        );
+      }
+
+      await _auth.sendPasswordResetEmail(email: normalizedEmail);
     } catch (e) {
       print('Password reset error: $e');
       rethrow;

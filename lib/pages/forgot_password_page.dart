@@ -81,9 +81,13 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
       );
     } catch (e) {
       if (!mounted) return;
+      final errorText = e.toString().replaceFirst('Exception: ', '');
+      final isMissingAccount = errorText.contains('No account found for this email address');
       await _showAlert(
-        title: 'Send Failed',
-        message: 'Unable to send reset email right now. Please try again.',
+        title: isMissingAccount ? 'Email Not Found' : 'Send Failed',
+        message: isMissingAccount
+            ? 'We could not find an account for $email. Please check the email address and try again.'
+            : 'Unable to send reset email right now. Please try again.',
       );
     } finally {
       if (mounted) {
