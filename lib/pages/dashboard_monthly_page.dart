@@ -4,7 +4,7 @@ extension _DashboardMonthlySection on _AllowanceBudgetHomeState {
   Widget _buildMonthlySection() {
     final scheme = Theme.of(context).colorScheme;
     final summaryRows = _buildPeriodSummaryRows();
-    final rowsPerPage = _summaryPeriod == 'month' ? 6 : 8;
+    const rowsPerPage = 8;
     final totalRows = summaryRows.length;
     final maxPage =
       totalRows == 0 ? 0 : ((totalRows - 1) ~/ rowsPerPage);
@@ -19,6 +19,10 @@ extension _DashboardMonthlySection on _AllowanceBudgetHomeState {
     final visibleRows = totalRows == 0
         ? <_PeriodSummaryRow>[]
         : summaryRows.sublist(startIndex, endIndex);
+    final displayRows = List<_PeriodSummaryRow?>.generate(
+      rowsPerPage,
+      (index) => index < visibleRows.length ? visibleRows[index] : null,
+    );
     final periodLabel = _summaryPeriod == 'month'
         ? 'Month'
         : _summaryPeriod == 'week'
@@ -36,102 +40,101 @@ extension _DashboardMonthlySection on _AllowanceBudgetHomeState {
             const SizedBox(height: 4),
             const Text('Compact calendar filters: pick period and date.'),
             const SizedBox(height: 8),
-            LayoutBuilder(
-              builder: (context, constraints) {
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+            SizedBox(
+              height: 40,
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
                   children: [
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        ChoiceChip(
-                          label: const Text('Month'),
-                          selected: _summaryPeriod == 'month',
-                          onSelected: (_) => _runState(() {
-                            _summaryPeriod = 'month';
-                            _monthlyPage = 0;
-                          }),
+                    ChoiceChip(
+                      label: const Text('Month'),
+                      selected: _summaryPeriod == 'month',
+                      onSelected: (_) => _runState(() {
+                        _summaryPeriod = 'month';
+                        _monthlyPage = 0;
+                      }),
+                    ),
+                    const SizedBox(width: 8),
+                    ChoiceChip(
+                      label: const Text('Week'),
+                      selected: _summaryPeriod == 'week',
+                      onSelected: (_) => _runState(() {
+                        _summaryPeriod = 'week';
+                        _monthlyPage = 0;
+                      }),
+                    ),
+                    const SizedBox(width: 8),
+                    ChoiceChip(
+                      label: const Text('Year'),
+                      selected: _summaryPeriod == 'year',
+                      onSelected: (_) => _runState(() {
+                        _summaryPeriod = 'year';
+                        _monthlyPage = 0;
+                      }),
+                    ),
+                    if (_summaryPeriod == 'week') ...[
+                      const SizedBox(width: 8),
+                      ActionChip(
+                        avatar: const Icon(Icons.calendar_month_outlined,
+                            size: 16),
+                        label: const Text('Date'),
+                        onPressed: _pickMonthlyAnchorDate,
+                      ),
+                    ],
+                    const SizedBox(width: 8),
+                    PopupMenuButton<String>(
+                      tooltip: 'Manage Columns',
+                      onSelected: (value) {
+                        _runState(() {
+                          switch (value) {
+                            case 'allowance':
+                              _monthlyShowAllowance = !_monthlyShowAllowance;
+                              break;
+                            case 'spent':
+                              _monthlyShowSpent = !_monthlyShowSpent;
+                              break;
+                            case 'saved':
+                              _monthlyShowSaved = !_monthlyShowSaved;
+                              break;
+                            case 'rate':
+                              _monthlyShowRate = !_monthlyShowRate;
+                              break;
+                          }
+                          if (_monthlyVisibleColumnCount() == 1) {
+                            _monthlyShowAllowance = true;
+                          }
+                        });
+                      },
+                      itemBuilder: (context) => [
+                        CheckedPopupMenuItem<String>(
+                          value: 'allowance',
+                          checked: _monthlyShowAllowance,
+                          child: const Text('Allowance'),
                         ),
-                        ChoiceChip(
-                          label: const Text('Week'),
-                          selected: _summaryPeriod == 'week',
-                          onSelected: (_) => _runState(() {
-                            _summaryPeriod = 'week';
-                            _monthlyPage = 0;
-                          }),
+                        CheckedPopupMenuItem<String>(
+                          value: 'spent',
+                          checked: _monthlyShowSpent,
+                          child: const Text('Spent'),
                         ),
-                        ChoiceChip(
-                          label: const Text('Year'),
-                          selected: _summaryPeriod == 'year',
-                          onSelected: (_) => _runState(() {
-                            _summaryPeriod = 'year';
-                            _monthlyPage = 0;
-                          }),
+                        CheckedPopupMenuItem<String>(
+                          value: 'saved',
+                          checked: _monthlyShowSaved,
+                          child: const Text('Saved'),
                         ),
-                        if (_summaryPeriod == 'week')
-                          ActionChip(
-                            avatar: const Icon(Icons.calendar_month_outlined,
-                                size: 16),
-                            label: const Text('Date'),
-                            onPressed: _pickMonthlyAnchorDate,
-                          ),
-                        PopupMenuButton<String>(
-                          tooltip: 'Manage Columns',
-                          onSelected: (value) {
-                            _runState(() {
-                              switch (value) {
-                                case 'allowance':
-                                  _monthlyShowAllowance =
-                                      !_monthlyShowAllowance;
-                                  break;
-                                case 'spent':
-                                  _monthlyShowSpent = !_monthlyShowSpent;
-                                  break;
-                                case 'saved':
-                                  _monthlyShowSaved = !_monthlyShowSaved;
-                                  break;
-                                case 'rate':
-                                  _monthlyShowRate = !_monthlyShowRate;
-                                  break;
-                              }
-                              if (_monthlyVisibleColumnCount() == 1) {
-                                _monthlyShowAllowance = true;
-                              }
-                            });
-                          },
-                          itemBuilder: (context) => [
-                            CheckedPopupMenuItem<String>(
-                              value: 'allowance',
-                              checked: _monthlyShowAllowance,
-                              child: const Text('Allowance'),
-                            ),
-                            CheckedPopupMenuItem<String>(
-                              value: 'spent',
-                              checked: _monthlyShowSpent,
-                              child: const Text('Spent'),
-                            ),
-                            CheckedPopupMenuItem<String>(
-                              value: 'saved',
-                              checked: _monthlyShowSaved,
-                              child: const Text('Saved'),
-                            ),
-                            CheckedPopupMenuItem<String>(
-                              value: 'rate',
-                              checked: _monthlyShowRate,
-                              child: const Text('Spend Rate'),
-                            ),
-                          ],
-                          child: const Chip(
-                            avatar: Icon(Icons.view_column_outlined, size: 16),
-                            label: Text('Columns'),
-                          ),
+                        CheckedPopupMenuItem<String>(
+                          value: 'rate',
+                          checked: _monthlyShowRate,
+                          child: const Text('Spend Rate'),
                         ),
                       ],
+                      child: const Chip(
+                        avatar: Icon(Icons.view_column_outlined, size: 16),
+                        label: Text('Columns'),
+                      ),
                     ),
                   ],
-                );
-              },
+                ),
+              ),
             ),
             const SizedBox(height: 8),
             Container(
@@ -166,7 +169,23 @@ extension _DashboardMonthlySection on _AllowanceBudgetHomeState {
                       if (_monthlyShowRate)
                         const DataColumn(label: Text('SPEND RATE')),
                     ],
-                    rows: visibleRows.map((row) {
+                    rows: displayRows.map((row) {
+                      if (row == null) {
+                        return DataRow(
+                          cells: [
+                            const DataCell(Text('')),
+                            if (_monthlyShowAllowance)
+                              const DataCell(Text('')),
+                            if (_monthlyShowSpent)
+                              const DataCell(Text('')),
+                            if (_monthlyShowSaved)
+                              const DataCell(Text('')),
+                            if (_monthlyShowRate)
+                              const DataCell(Text('')),
+                          ],
+                        );
+                      }
+
                       final saved = row.allowance - row.spent;
                       final rate = row.allowance > 0
                           ? (row.spent / row.allowance) * 100

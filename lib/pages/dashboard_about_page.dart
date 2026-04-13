@@ -55,8 +55,8 @@ extension _DashboardAboutSection on _AllowanceBudgetHomeState {
 
     const developers = [
       (
-        name: 'Jim Agustin Maido',
-        role: 'Backend Developer',
+        name: 'Jim Maido',
+        role: 'Backend Developer and Database',
       ),
       (
         name: 'Joshua Tordecilla',
@@ -112,19 +112,19 @@ extension _DashboardAboutSection on _AllowanceBudgetHomeState {
                   runSpacing: 10,
                   children: const [
                     _GuideCard(
-                      icon: Icons.looks_one_outlined,
+                      icon: Icons.account_balance_wallet_outlined,
                       step: 'Step 1',
                       title: 'Set your starting budget',
                       body:
                           'Enter the amount you want to manage so the app can track it for you.'),
                     _GuideCard(
-                        icon: Icons.looks_two_outlined,
+                        icon: Icons.receipt_long_outlined,
                         step: 'Step 2',
                         title: 'Record your spending',
                         body:
                             'Add each expense so your totals, progress, and category breakdown stay updated.'),
                     _GuideCard(
-                        icon: Icons.looks_3_outlined,
+                        icon: Icons.insights_outlined,
                         step: 'Step 3',
                         title: 'Review your progress',
                         body:

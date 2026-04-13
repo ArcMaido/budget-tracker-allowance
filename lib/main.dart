@@ -1087,6 +1087,9 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
       style: IconButton.styleFrom(
         backgroundColor: const Color(0xFFE2EFE8),
         foregroundColor: const Color(0xFF1A7A59),
+        padding: EdgeInsets.zero,
+        minimumSize: const Size(40, 40),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
       ),
       tooltip: 'Settings',
     );
@@ -1107,6 +1110,9 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
       style: IconButton.styleFrom(
         backgroundColor: const Color(0xFFE2EFE8),
         foregroundColor: const Color(0xFF1A7A59),
+        padding: EdgeInsets.zero,
+        minimumSize: const Size(40, 40),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
       ),
       tooltip: 'Profile',
     );
@@ -1305,20 +1311,23 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
       section = Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            children: [
-              Text(
-                'Coinzy',
-                style: Theme.of(context)
-                    .textTheme
-                    .titleLarge
-                    ?.copyWith(fontWeight: FontWeight.w800),
-              ),
-              const Spacer(),
-              _buildSettingsButton(),
-              const SizedBox(width: 8),
-              _buildProfileButton(),
-            ],
+          SizedBox(
+            height: 44,
+            child: Row(
+              children: [
+                Text(
+                  'Coinzy',
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleLarge
+                      ?.copyWith(fontWeight: FontWeight.w800),
+                ),
+                const Spacer(),
+                _buildSettingsButton(),
+                const SizedBox(width: 8),
+                _buildProfileButton(),
+              ],
+            ),
           ),
           const SizedBox(height: 10),
           section,
@@ -2445,6 +2454,7 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   late String _selectedCurrency;
+  late bool _isDarkMode;
   static const Map<String, String> _currencyNames = {
     'PHP': 'Philippine Peso',
     'USD': 'US Dollar',
@@ -2472,6 +2482,7 @@ class _SettingsPageState extends State<SettingsPage> {
   void initState() {
     super.initState();
     _selectedCurrency = widget.currencyCode;
+    _isDarkMode = widget.isDarkMode;
   }
 
   @override
@@ -2479,6 +2490,9 @@ class _SettingsPageState extends State<SettingsPage> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.currencyCode != widget.currencyCode) {
       _selectedCurrency = widget.currencyCode;
+    }
+    if (oldWidget.isDarkMode != widget.isDarkMode) {
+      _isDarkMode = widget.isDarkMode;
     }
   }
 
@@ -2565,8 +2579,25 @@ class _SettingsPageState extends State<SettingsPage> {
           const SizedBox(height: 8),
           Card(
             child: SwitchListTile.adaptive(
-              value: widget.isDarkMode,
-              onChanged: widget.onToggleDarkMode,
+              value: _isDarkMode,
+              onChanged: (value) {
+                setState(() => _isDarkMode = value);
+                widget.onToggleDarkMode(value);
+              },
+              secondary: Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: scheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  _isDarkMode
+                      ? Icons.dark_mode_outlined
+                      : Icons.light_mode_outlined,
+                  color: scheme.onPrimaryContainer,
+                ),
+              ),
               title: const Text('Dark mode'),
               subtitle: const Text('Switch app appearance'),
             ),
@@ -2595,7 +2626,7 @@ class _SettingsPageState extends State<SettingsPage> {
           const SizedBox(height: 8),
           Card(
             child: ListTile(
-              leading: const Icon(Icons.logout),
+              leading: Icon(Icons.logout, color: Colors.red.shade700),
               title: const Text('Log Out'),
               subtitle: const Text('Sign out of this account'),
               onTap: () async {
