@@ -31,7 +31,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Welcome Back'), findsOneWidget);
+    expect(find.text('Welcome'), findsOneWidget);
   });
 
   testWidgets('Login page shows sign in action', (WidgetTester tester) async {

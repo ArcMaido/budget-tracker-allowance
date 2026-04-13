@@ -330,16 +330,18 @@ class _ProfilePageState extends State<ProfilePage> {
       return;
     }
 
-    setState(() => _isSaving = true);
+    setState(() {
+      _isSaving = true;
+      _isEditing = false;
+    });
+    _showSavingMessage();
 
     try {
-      // Update auth profile
-      await AuthService.updateUserProfile(
+      final updateAuthFuture = AuthService.updateUserProfile(
         fullName: name,
       ).timeout(const Duration(seconds: 8));
 
-      // Save to Firestore
-      await FirebaseService.saveUserProfile(
+      final saveProfileFuture = FirebaseService.saveUserProfile(
         userId: user.uid,
         userData: {
           'fullName': name,
@@ -350,17 +352,21 @@ class _ProfilePageState extends State<ProfilePage> {
         },
       ).timeout(const Duration(seconds: 8));
 
+      await Future.wait([updateAuthFuture, saveProfileFuture]);
+
       if (!mounted) return;
 
       setState(() {
-        _isEditing = false;
         _isSaving = false;
       });
 
-      await _showSaveSuccessDialog();
+      _showSaveSuccessDialog();
     } catch (e) {
       if (!mounted) return;
-      setState(() => _isSaving = false);
+      setState(() {
+        _isSaving = false;
+        _isEditing = true;
+      });
       _showMessage('Failed to save profile: ${e.toString()}');
     }
   }
@@ -423,6 +429,59 @@ class _ProfilePageState extends State<ProfilePage> {
                   Text(
                     message,
                     style: TextStyle(color: fgColor.withValues(alpha: 0.95)),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showSavingMessage() {
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    const bgColor = Color(0xFF1E40AF);
+    const fgColor = Colors.white;
+
+    messenger.removeCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: bgColor,
+        elevation: 10,
+        duration: const Duration(seconds: 2),
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        content: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              width: 22,
+              height: 22,
+              child: CircularProgressIndicator(
+                strokeWidth: 2.4,
+                valueColor: const AlwaysStoppedAnimation<Color>(fgColor),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: const [
+                  Text(
+                    'Saving',
+                    style: TextStyle(
+                      color: fgColor,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  SizedBox(height: 2),
+                  Text(
+                    'Updating your profile details...',
+                    style: TextStyle(color: fgColor),
                   ),
                 ],
               ),

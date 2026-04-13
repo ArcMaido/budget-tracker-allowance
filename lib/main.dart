@@ -421,7 +421,7 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
     return math.sqrt((dr * dr) + (dg * dg) + (db * db));
   }
 
-  Future<void> _save({bool syncRemote = true}) async {
+  Future<void> _save() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_scopedStorageKey(), _data.toJson());
@@ -429,40 +429,6 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
     } catch (e) {
       debugPrint('[Save] SharedPreferences error: $e');
       rethrow;
-    }
-
-    if (!syncRemote) {
-      return;
-    }
-
-    try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user != null) {
-        debugPrint('[Save] Syncing to Firebase for user: ${user.uid}');
-        for (final tx in _data.transactions) {
-          await DataService.saveTransaction(
-            category: tx.category,
-            amount: tx.amount,
-            date: tx.date,
-            description: tx.title,
-          );
-        }
-        for (final category in _data.categories.entries) {
-          await DataService.saveCategory(
-            categoryName: category.key,
-            budget: category.value,
-          );
-        }
-        await DataService.setMonthlyAllowance(
-          _allowanceForMonthKey(_nowMonthKey()),
-        );
-        debugPrint('[Save] Firebase sync completed');
-      } else {
-        debugPrint('[Save] No user logged in, skipping Firebase sync');
-      }
-    } catch (e) {
-      debugPrint('[Save] Firebase sync error: $e');
-      // Don't rethrow - Firebase errors should not prevent local save
     }
   }
 
@@ -693,8 +659,10 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
           _data.monthlyAllowance = next;
         }
       });
-      await _save(syncRemote: false);
-      unawaited(DataService.setMonthlyAllowance(next));
+      await _save();
+      if (isCurrentMonth) {
+        unawaited(DataService.setMonthlyAllowance(next));
+      }
 
       if (!mounted) {
         return true;
@@ -787,6 +755,12 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
       _expenseAmountController.clear();
     });
     await _save();
+    unawaited(DataService.saveTransaction(
+      category: tx.category,
+      amount: tx.amount,
+      date: tx.date,
+      description: tx.title,
+    ));
   }
 
   Future<void> _upsertCategory() async {
@@ -800,6 +774,12 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
     final existingKey = _findCategoryKeyIgnoreCase(name);
     final targetKey = existingKey ?? name;
     final existed = existingKey != null;
+    final currentBudget = existed ? (_data.categories[targetKey] ?? 0) : null;
+
+    if (existed && currentBudget != null && (currentBudget - budget).abs() < 0.0001) {
+      _showHint('No changes detected. The category budget is already set to this amount.');
+      return;
+    }
 
     try {
       setState(() {
@@ -821,6 +801,10 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
         backgroundColor: const Color(0xFF166534),
         foregroundColor: Colors.white,
       );
+      unawaited(DataService.saveCategory(
+        categoryName: targetKey,
+        budget: budget,
+      ));
       unawaited(_saveWithHintOnError('saving category'));
     } catch (e) {
       debugPrint('Error upserting category: $e');
@@ -867,6 +851,7 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
       backgroundColor: const Color(0xFF166534),
       foregroundColor: Colors.white,
     );
+    unawaited(DataService.deleteCategory(targetKey));
     unawaited(_saveWithHintOnError('removing category'));
   }
 
