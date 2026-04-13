@@ -63,7 +63,7 @@ extension _DashboardAboutSection on _AllowanceBudgetHomeState {
         role: 'Frontend Developer',
       ),
       (
-        name: 'John Reb Alonzo',
+        name: 'Jonreb Alonzo',
         role: 'Project Leader',
       ),
       (

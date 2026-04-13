@@ -4,17 +4,18 @@ extension _DashboardMonthlySection on _AllowanceBudgetHomeState {
   Widget _buildMonthlySection() {
     final scheme = Theme.of(context).colorScheme;
     final summaryRows = _buildPeriodSummaryRows();
+    final rowsPerPage = _summaryPeriod == 'month' ? 6 : 8;
     final totalRows = summaryRows.length;
     final maxPage =
-        totalRows == 0 ? 0 : ((totalRows - 1) ~/ _monthlyRowsPerPage);
+      totalRows == 0 ? 0 : ((totalRows - 1) ~/ rowsPerPage);
     final safePage = _monthlyPage.clamp(0, maxPage);
     if (safePage != _monthlyPage) {
       _monthlyPage = safePage;
     }
-    final startIndex = totalRows == 0 ? 0 : safePage * _monthlyRowsPerPage;
+    final startIndex = totalRows == 0 ? 0 : safePage * rowsPerPage;
     final endIndex = totalRows == 0
         ? 0
-        : math.min(startIndex + _monthlyRowsPerPage, totalRows);
+      : math.min(startIndex + rowsPerPage, totalRows);
     final visibleRows = totalRows == 0
         ? <_PeriodSummaryRow>[]
         : summaryRows.sublist(startIndex, endIndex);
@@ -75,26 +76,6 @@ extension _DashboardMonthlySection on _AllowanceBudgetHomeState {
                             label: const Text('Date'),
                             onPressed: _pickMonthlyAnchorDate,
                           ),
-                        PopupMenuButton<int>(
-                          tooltip: 'Rows per page',
-                          onSelected: (value) {
-                            _runState(() {
-                              _monthlyRowsPerPage = value;
-                              _monthlyPage = 0;
-                            });
-                          },
-                          itemBuilder: (context) => const [
-                            PopupMenuItem(value: 5, child: Text('5 rows')),
-                            PopupMenuItem(value: 8, child: Text('8 rows')),
-                            PopupMenuItem(value: 10, child: Text('10 rows')),
-                            PopupMenuItem(value: 20, child: Text('20 rows')),
-                          ],
-                          child: Chip(
-                            avatar:
-                                const Icon(Icons.table_rows_outlined, size: 16),
-                            label: Text('$_monthlyRowsPerPage rows'),
-                          ),
-                        ),
                         PopupMenuButton<String>(
                           tooltip: 'Manage Columns',
                           onSelected: (value) {

@@ -200,7 +200,6 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
   int _summaryYear = DateTime.now().year;
   int _summaryMonth = DateTime.now().month;
   int _summaryStartDay = 1;
-  int _monthlyRowsPerPage = 8;
   int _monthlyPage = 0;
   int _historyRowsPerPage = 10;
   int _historyPage = 0;
@@ -422,7 +421,7 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
     return math.sqrt((dr * dr) + (dg * dg) + (db * db));
   }
 
-  Future<void> _save() async {
+  Future<void> _save({bool syncRemote = true}) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_scopedStorageKey(), _data.toJson());
@@ -430,6 +429,10 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
     } catch (e) {
       debugPrint('[Save] SharedPreferences error: $e');
       rethrow;
+    }
+
+    if (!syncRemote) {
+      return;
     }
 
     try {
@@ -690,8 +693,8 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
           _data.monthlyAllowance = next;
         }
       });
-      await _save();
-      await DataService.setMonthlyAllowance(next);
+      await _save(syncRemote: false);
+      unawaited(DataService.setMonthlyAllowance(next));
 
       if (!mounted) {
         return true;
@@ -699,24 +702,43 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
 
       _showBasicSnack(
         'Allowance for ${DateFormat('MMM yyyy').format(_allowanceMonth)} has been set successfully.',
+        backgroundColor: const Color(0xFF166534),
+        textColor: Colors.white,
       );
       return true;
     } catch (e) {
       debugPrint('Error saving allowance: $e');
       if (mounted) {
-        _showBasicSnack('Error saving allowance: $e');
+        _showBasicSnack(
+          'Error saving allowance: $e',
+          backgroundColor: const Color(0xFFB91C1C),
+          textColor: Colors.white,
+        );
       }
       return false;
     }
   }
 
-  void _showBasicSnack(String text) {
+  void _showBasicSnack(
+    String text, {
+    Color? backgroundColor,
+    Color? textColor,
+  }) {
     if (!mounted) {
       return;
     }
     final messenger = ScaffoldMessenger.of(context);
     messenger.removeCurrentSnackBar();
-    messenger.showSnackBar(SnackBar(content: Text(text)));
+    messenger.showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: backgroundColor,
+        content: Text(
+          text,
+          style: textColor == null ? null : TextStyle(color: textColor),
+        ),
+      ),
+    );
   }
 
   Future<void> _addExpense() async {
@@ -1718,10 +1740,15 @@ class _SummaryCard extends StatelessWidget {
 }
 
 class _KpiTile extends StatelessWidget {
-  const _KpiTile({required this.title, required this.value});
+  const _KpiTile({
+    required this.title,
+    required this.value,
+    this.valueColor,
+  });
 
   final String title;
   final String value;
+  final Color? valueColor;
 
   @override
   Widget build(BuildContext context) {
@@ -1743,7 +1770,7 @@ class _KpiTile extends StatelessWidget {
               style: TextStyle(
                   fontWeight: FontWeight.w700,
                   fontSize: 13,
-                  color: scheme.onSurface),
+                  color: valueColor ?? scheme.onSurface),
               overflow: TextOverflow.ellipsis),
         ],
       ),
