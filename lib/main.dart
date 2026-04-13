@@ -1764,9 +1764,14 @@ class _KpiTile extends StatelessWidget {
 }
 
 class _GuideCard extends StatelessWidget {
-  const _GuideCard(
-      {required this.step, required this.title, required this.body});
+  const _GuideCard({
+    required this.icon,
+    required this.step,
+    required this.title,
+    required this.body,
+  });
 
+  final IconData icon;
   final String step;
   final String title;
   final String body;
@@ -1780,9 +1785,19 @@ class _GuideCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(step,
-                style: TextStyle(
-                    fontWeight: FontWeight.w700, color: scheme.primary)),
+            Row(
+              children: [
+                Icon(icon, size: 18, color: scheme.primary),
+                const SizedBox(width: 8),
+                Text(
+                  step,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    color: scheme.primary,
+                  ),
+                ),
+              ],
+            ),
             const SizedBox(height: 4),
             Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
             const SizedBox(height: 4),

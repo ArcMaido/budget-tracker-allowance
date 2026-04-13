@@ -112,20 +112,23 @@ extension _DashboardAboutSection on _AllowanceBudgetHomeState {
                   runSpacing: 10,
                   children: const [
                     _GuideCard(
-                        step: 'Step 1',
-                        title: 'Set your monthly allowance',
-                        body:
-                            'Use the Allowance card to save your budget in PHP.'),
+                      icon: Icons.looks_one_outlined,
+                      step: 'Step 1',
+                      title: 'Set your starting budget',
+                      body:
+                          'Enter the amount you want to manage so the app can track it for you.'),
                     _GuideCard(
+                        icon: Icons.looks_two_outlined,
                         step: 'Step 2',
-                        title: 'Add expenses as they happen',
+                        title: 'Record your spending',
                         body:
-                            'Each entry updates your totals, progress bar, and insights automatically.'),
+                            'Add each expense so your totals, progress, and category breakdown stay updated.'),
                     _GuideCard(
+                        icon: Icons.looks_3_outlined,
                         step: 'Step 3',
-                        title: 'Review trends monthly',
+                        title: 'Review your progress',
                         body:
-                            'Check categories, monthly summaries, and filter transaction history.'),
+                            'Check your categories, summaries, and history to see where your money goes.'),
                   ].map((g) => SizedBox(width: cardWidth, child: g)).toList(),
                 );
               },
