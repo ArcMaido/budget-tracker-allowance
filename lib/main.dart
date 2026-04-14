@@ -10,6 +10,8 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:file_saver/file_saver.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart' hide TextDirection;
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'auth_service.dart';
@@ -646,6 +648,67 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
       ..sort((a, b) => b.date.compareTo(a.date));
   }
 
+  List<ExpenseTx> _sortedHistoryRowsForExport(List<ExpenseTx> rows) {
+    final exportedRows = List<ExpenseTx>.from(rows)
+      ..sort((a, b) {
+        final categoryCompare =
+            a.category.toLowerCase().compareTo(b.category.toLowerCase());
+        if (categoryCompare != 0) {
+          return categoryCompare;
+        }
+        return a.date.compareTo(b.date);
+      });
+    return exportedRows;
+  }
+
+  String _historyExportBaseFileName() {
+    final exportDate = DateFormat('MM-dd-yyyy').format(DateTime.now());
+    final selectedCategory = _filterCategory == 'all'
+        ? null
+        : _filterCategory
+            .trim()
+            .replaceAll(RegExp(r'[<>:"/\\|?*]'), '')
+            .replaceAll(RegExp(r'\s+'), '_');
+    return selectedCategory == null || selectedCategory.isEmpty
+        ? 'History_Transaction_($exportDate)'
+        : 'History_Transaction_($selectedCategory)_($exportDate)';
+  }
+
+  Future<void> _saveHistoryExportFile({
+    required Uint8List bytes,
+    required String fileExtension,
+    required MimeType mimeType,
+  }) async {
+    final fileName = _historyExportBaseFileName();
+    String? savedPath;
+
+    try {
+      savedPath = await FileSaver.instance.saveAs(
+        name: fileName,
+        bytes: bytes,
+        fileExtension: fileExtension,
+        mimeType: mimeType,
+      );
+    } catch (_) {
+      savedPath = null;
+    }
+
+    if (savedPath == null || savedPath.trim().isEmpty) {
+      savedPath = await FileSaver.instance.saveFile(
+        name: fileName,
+        bytes: bytes,
+        fileExtension: fileExtension,
+        mimeType: mimeType,
+      );
+    }
+
+    final normalizedPath = savedPath.trim();
+    if (normalizedPath.isEmpty ||
+        normalizedPath.toLowerCase().contains('something went wrong')) {
+      throw Exception('File saver did not return a valid save path.');
+    }
+  }
+
   Future<void> _exportHistoryToExcel(List<ExpenseTx> rows) async {
     if (rows.isEmpty) {
       _showHint('There are no transactions to export for this filter.');
@@ -655,19 +718,14 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
     try {
       final excel = Excel.createExcel();
       final sheet = excel['History'];
-      final exportedRows = List<ExpenseTx>.from(rows)
-        ..sort((a, b) {
-          final categoryCompare =
-              a.category.toLowerCase().compareTo(b.category.toLowerCase());
-          if (categoryCompare != 0) {
-            return categoryCompare;
-          }
-          return a.date.compareTo(b.date);
-        });
+      final exportedRows = _sortedHistoryRowsForExport(rows);
 
-      sheet.appendRow([
-        TextCellValue('Coinzy Transaction History'),
-      ]);
+      excel.merge(
+        'History',
+        CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 0),
+        CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: 0),
+        customValue: TextCellValue('Coinzy Transaction History'),
+      );
       sheet.appendRow([
         TextCellValue(''),
       ]);
@@ -678,6 +736,8 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
       titleCell.cellStyle = CellStyle(
         bold: true,
         fontSize: 20,
+        horizontalAlign: HorizontalAlign.Center,
+        verticalAlign: VerticalAlign.Center,
       );
 
       sheet.appendRow([
@@ -686,6 +746,21 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
         TextCellValue('Title'),
         TextCellValue('Amount (${_currencyCode})'),
       ]);
+
+      final headerCellStyle = CellStyle(
+        bold: true,
+        horizontalAlign: HorizontalAlign.Center,
+        verticalAlign: VerticalAlign.Center,
+      );
+      final dataCellStyle = CellStyle(
+        horizontalAlign: HorizontalAlign.Center,
+        verticalAlign: VerticalAlign.Center,
+      );
+      for (var col = 0; col < 4; col++) {
+        sheet
+            .cell(CellIndex.indexByColumnRow(columnIndex: col, rowIndex: 2))
+            .cellStyle = headerCellStyle;
+      }
 
       final categoryStyles = <String, CellStyle>{};
       CellStyle styleForCategory(String category) {
@@ -700,6 +775,8 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
           return CellStyle(
             backgroundColorHex: ExcelColor.fromHexString(backgroundHex),
             fontColorHex: fontColor,
+            horizontalAlign: HorizontalAlign.Center,
+            verticalAlign: VerticalAlign.Center,
           );
         });
       }
@@ -720,52 +797,48 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
           ),
         );
         categoryCell.cellStyle = styleForCategory(tx.category);
+
+        sheet
+            .cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: i + 3))
+            .cellStyle = dataCellStyle;
+        sheet
+            .cell(CellIndex.indexByColumnRow(columnIndex: 2, rowIndex: i + 3))
+            .cellStyle = dataCellStyle;
+        sheet
+            .cell(CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: i + 3))
+            .cellStyle = dataCellStyle;
       }
+
+      var maxDateLen = 'Date'.length;
+      var maxCategoryLen = 'Category'.length;
+      var maxTitleLen = 'Title'.length;
+      var maxAmountLen = 'Amount (${_currencyCode})'.length;
+      for (final tx in exportedRows) {
+        maxDateLen = math.max(maxDateLen, DateFormat('yyyy-MM-dd').format(tx.date).length);
+        maxCategoryLen = math.max(maxCategoryLen, tx.category.length);
+        maxTitleLen = math.max(maxTitleLen, tx.title.length);
+        maxAmountLen = math.max(maxAmountLen, _money(tx.amount).length);
+      }
+      double columnWidth(int len, double min, double max) {
+        final calculated = len + 2.0;
+        return calculated.clamp(min, max);
+      }
+
+      sheet.setColumnWidth(0, columnWidth(maxDateLen, 11, 16));
+      sheet.setColumnWidth(1, columnWidth(maxCategoryLen, 10, 18));
+      sheet.setColumnWidth(2, columnWidth(maxTitleLen, 14, 34));
+      sheet.setColumnWidth(3, columnWidth(maxAmountLen, 14, 22));
 
       final fileBytes = excel.save();
       if (fileBytes == null || fileBytes.isEmpty) {
         throw Exception('Unable to generate Excel file bytes.');
       }
 
-        final exportDate = DateFormat('MM-dd-yyyy').format(DateTime.now());
-        final selectedCategory = _filterCategory == 'all'
-          ? null
-          : _filterCategory
-            .trim()
-            .replaceAll(RegExp(r'[<>:"/\\|?*]'), '')
-            .replaceAll(RegExp(r'\s+'), '_');
-        final fileName = selectedCategory == null || selectedCategory.isEmpty
-          ? 'History_Transaction_($exportDate)'
-          : 'History_Transaction_($selectedCategory)_($exportDate)';
-      final bytes = Uint8List.fromList(fileBytes);
-
-      String? savedPath;
-      try {
-        // Prefer Save As so users can choose a visible folder like Downloads.
-        savedPath = await FileSaver.instance.saveAs(
-          name: fileName,
-          bytes: bytes,
-          fileExtension: 'xlsx',
-          mimeType: MimeType.microsoftExcel,
-        );
-      } catch (_) {
-        savedPath = null;
-      }
-
-      if (savedPath == null || savedPath.trim().isEmpty) {
-        savedPath = await FileSaver.instance.saveFile(
-          name: fileName,
-          bytes: bytes,
-          fileExtension: 'xlsx',
-          mimeType: MimeType.microsoftExcel,
-        );
-      }
-
-      final normalizedPath = savedPath.trim();
-      if (normalizedPath.isEmpty ||
-          normalizedPath.toLowerCase().contains('something went wrong')) {
-        throw Exception('File saver did not return a valid save path.');
-      }
+      await _saveHistoryExportFile(
+        bytes: Uint8List.fromList(fileBytes),
+        fileExtension: 'xlsx',
+        mimeType: MimeType.microsoftExcel,
+      );
 
       if (!mounted) {
         return;
@@ -787,6 +860,131 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
       _showSweetNotification(
         title: 'Export Failed',
         message: 'Could not export Excel file. Please try again.',
+        icon: Icons.error_outline_rounded,
+        backgroundColor: const Color(0xFFB91C1C),
+        foregroundColor: Colors.white,
+        duration: const Duration(seconds: 3),
+      );
+    }
+  }
+
+  Future<void> _exportHistoryToPdf(List<ExpenseTx> rows) async {
+    if (rows.isEmpty) {
+      _showHint('There are no transactions to export for this filter.');
+      return;
+    }
+
+    try {
+      final exportedRows = _sortedHistoryRowsForExport(rows);
+      final pdf = pw.Document();
+
+      pw.Widget plainCell(String value) {
+        return pw.Padding(
+          padding: const pw.EdgeInsets.all(6),
+          child: pw.Center(
+            child: pw.Text(
+              value,
+              textAlign: pw.TextAlign.center,
+              style: const pw.TextStyle(fontSize: 10),
+            ),
+          ),
+        );
+      }
+
+      pw.Widget categoryCell(String category) {
+        final chartColor = _categoryLineColors[category] ?? Colors.grey;
+        final bgColor = PdfColor.fromInt(chartColor.toARGB32());
+        final fgColor =
+            chartColor.computeLuminance() < 0.5 ? PdfColors.white : PdfColors.black;
+
+        return pw.Container(
+          color: bgColor,
+          padding: const pw.EdgeInsets.all(6),
+          child: pw.Center(
+            child: pw.Text(
+              category,
+              textAlign: pw.TextAlign.center,
+              style: pw.TextStyle(color: fgColor, fontSize: 10),
+            ),
+          ),
+        );
+      }
+
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          build: (context) => [
+            pw.Text(
+              'Coinzy Transaction History',
+              style: pw.TextStyle(
+                fontSize: 22,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+            pw.SizedBox(height: 8),
+            pw.Text('Exported on ${DateFormat('MM-dd-yyyy').format(DateTime.now())}'),
+            pw.SizedBox(height: 14),
+            pw.Table(
+              tableWidth: pw.TableWidth.min,
+              border: pw.TableBorder.all(color: PdfColors.grey400, width: 0.5),
+              columnWidths: {
+                0: const pw.IntrinsicColumnWidth(),
+                1: const pw.IntrinsicColumnWidth(),
+                2: const pw.IntrinsicColumnWidth(flex: 2),
+                3: const pw.IntrinsicColumnWidth(),
+              },
+              children: [
+                pw.TableRow(
+                  decoration: const pw.BoxDecoration(color: PdfColors.grey300),
+                  children: [
+                    plainCell('Date'),
+                    plainCell('Category'),
+                    plainCell('Title'),
+                    plainCell('Amount (${_currencyCode})'),
+                  ],
+                ),
+                ...exportedRows.map((tx) {
+                  return pw.TableRow(
+                    children: [
+                      plainCell(DateFormat('yyyy-MM-dd').format(tx.date)),
+                      categoryCell(tx.category),
+                      plainCell(tx.title),
+                      plainCell(_money(tx.amount)),
+                    ],
+                  );
+                }),
+              ],
+            ),
+          ],
+        ),
+      );
+
+      await _saveHistoryExportFile(
+        bytes: Uint8List.fromList(await pdf.save()),
+        fileExtension: 'pdf',
+        mimeType: MimeType.pdf,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      _showSweetNotification(
+        title: 'Export Successful',
+        message: 'Done! Your history PDF file is ready.',
+        icon: Icons.picture_as_pdf_outlined,
+        backgroundColor: const Color(0xFF166534),
+        foregroundColor: Colors.white,
+        duration: const Duration(seconds: 3),
+      );
+    } catch (e) {
+      debugPrint('Error exporting history to PDF: $e');
+      if (!mounted) {
+        return;
+      }
+      _showSweetNotification(
+        title: 'Export Failed',
+        message: 'Could not export PDF file. Please try again.',
         icon: Icons.error_outline_rounded,
         backgroundColor: const Color(0xFFB91C1C),
         foregroundColor: Colors.white,
@@ -931,6 +1129,27 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
     if (existed && currentBudget != null && (currentBudget - budget).abs() < 0.0001) {
       _showHint('No changes detected. The category budget is already set to this amount.');
       return;
+    }
+
+    final allowanceMonthLabel = DateFormat('MMM yyyy').format(DateTime.now());
+    final currentMonthAllowance = _allowanceForMonthKey(_nowMonthKey());
+    final existingTotalCategoryBudget = _data.categories.values
+        .fold<double>(0, (sum, value) => sum + value);
+    final projectedTotalCategoryBudget =
+        existingTotalCategoryBudget - (currentBudget ?? 0) + budget;
+
+    if (currentMonthAllowance > 0 &&
+        projectedTotalCategoryBudget > currentMonthAllowance) {
+      final remainingAllowance = currentMonthAllowance - existingTotalCategoryBudget;
+      final shouldContinue = await _showCategoryAllowanceWarning(
+        category: targetKey,
+        categoryBudget: budget,
+        allowance: remainingAllowance,
+        allowanceMonthLabel: allowanceMonthLabel,
+      );
+      if (!shouldContinue) {
+        return;
+      }
     }
 
     try {
@@ -1194,6 +1413,77 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
                   fontWeight: FontWeight.w700,
                 ),
               ),
+            ],
+          ),
+          actions: [
+            OutlinedButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              style: FilledButton.styleFrom(
+                backgroundColor: scheme.error,
+                foregroundColor: scheme.onError,
+              ),
+              child: const Text('Continue'),
+            ),
+          ],
+        );
+      },
+    );
+
+    return decision ?? false;
+  }
+
+  Future<bool> _showCategoryAllowanceWarning({
+    required String category,
+    required double categoryBudget,
+    required double allowance,
+    required String allowanceMonthLabel,
+  }) async {
+    if (!mounted) {
+      return false;
+    }
+
+    final overBy = categoryBudget - allowance;
+    final decision = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        final scheme = Theme.of(dialogContext).colorScheme;
+        return AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          title: Row(
+            children: [
+              Icon(Icons.warning_amber_rounded, color: scheme.error),
+              const SizedBox(width: 8),
+              const Expanded(child: Text('Category Budget Warning')),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'The $category budget is higher than your remaining allowance for $allowanceMonthLabel.',
+              ),
+              const SizedBox(height: 10),
+              Text('Category budget: ${_money(categoryBudget)}'),
+              Text('Remaining allowance: ${_money(allowance)}'),
+              const SizedBox(height: 6),
+              Text(
+                'Over by: ${_money(overBy)}',
+                style: TextStyle(
+                  color: scheme.error,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text('Do you want to continue anyway?'),
+              const SizedBox(height: 4),
+              Text('Remaining allowance month: $allowanceMonthLabel'),
             ],
           ),
           actions: [

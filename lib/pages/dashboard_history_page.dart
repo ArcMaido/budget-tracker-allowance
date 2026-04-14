@@ -26,6 +26,8 @@ extension _DashboardHistorySection on _AllowanceBudgetHomeState {
                     builder: (context, constraints) {
                       final compact =
                           constraints.maxWidth < AppBreakpoints.compact;
+                      const excelBrand = Color(0xFF217346);
+                      const pdfBrand = Color(0xFFE53935);
                       return Wrap(
                         spacing: 10,
                         runSpacing: 10,
@@ -100,6 +102,62 @@ extension _DashboardHistorySection on _AllowanceBudgetHomeState {
                           if (compact)
                             SizedBox(
                               width: constraints.maxWidth,
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: FilledButton.icon(
+                                      onPressed: () => _exportHistoryToExcel(rows),
+                                      style: FilledButton.styleFrom(
+                                        backgroundColor: excelBrand,
+                                        foregroundColor: Colors.white,
+                                      ),
+                                      icon: const Icon(Icons.table_view_outlined),
+                                      label: const Text('Export Excel'),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: FilledButton.icon(
+                                      onPressed: () => _exportHistoryToPdf(rows),
+                                      style: FilledButton.styleFrom(
+                                        backgroundColor: pdfBrand,
+                                        foregroundColor: Colors.white,
+                                      ),
+                                      icon: const Icon(Icons.picture_as_pdf_outlined),
+                                      label: const Text('Export PDF'),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            )
+                          else
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                FilledButton.icon(
+                                  onPressed: () => _exportHistoryToExcel(rows),
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: excelBrand,
+                                    foregroundColor: Colors.white,
+                                  ),
+                                  icon: const Icon(Icons.table_view_outlined),
+                                  label: const Text('Export Excel'),
+                                ),
+                                const SizedBox(width: 8),
+                                FilledButton.icon(
+                                  onPressed: () => _exportHistoryToPdf(rows),
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: pdfBrand,
+                                    foregroundColor: Colors.white,
+                                  ),
+                                  icon: const Icon(Icons.picture_as_pdf_outlined),
+                                  label: const Text('Export PDF'),
+                                ),
+                              ],
+                            ),
+                          if (compact)
+                            SizedBox(
+                              width: constraints.maxWidth,
                               child: OutlinedButton(
                                 onPressed: () {
                                   _runState(() {
@@ -110,21 +168,6 @@ extension _DashboardHistorySection on _AllowanceBudgetHomeState {
                                   });
                                 },
                                 child: const Text('Clear'),
-                              ),
-                            )
-                          else
-                            OutlinedButton.icon(
-                              onPressed: () => _exportHistoryToExcel(rows),
-                              icon: const Icon(Icons.table_view_outlined),
-                              label: const Text('Export Excel'),
-                            ),
-                          if (compact)
-                            SizedBox(
-                              width: constraints.maxWidth,
-                              child: FilledButton.icon(
-                                onPressed: () => _exportHistoryToExcel(rows),
-                                icon: const Icon(Icons.table_view_outlined),
-                                label: const Text('Export Excel'),
                               ),
                             )
                           else
