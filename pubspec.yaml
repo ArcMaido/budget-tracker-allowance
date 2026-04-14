@@ -18,6 +18,8 @@ dependencies:
   intl: ^0.19.0
   shared_preferences: ^2.2.3
   country_flags: ^4.1.2
+  excel: ^4.0.6
+  file_saver: ^0.3.1
 
 dev_dependencies:
   flutter_test:

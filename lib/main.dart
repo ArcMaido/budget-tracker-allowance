@@ -1,10 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:country_flags/country_flags.dart';
+import 'package:excel/excel.dart' hide Border, TextSpan;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:file_saver/file_saver.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -641,6 +644,155 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
       return true;
     }).toList()
       ..sort((a, b) => b.date.compareTo(a.date));
+  }
+
+  Future<void> _exportHistoryToExcel(List<ExpenseTx> rows) async {
+    if (rows.isEmpty) {
+      _showHint('There are no transactions to export for this filter.');
+      return;
+    }
+
+    try {
+      final excel = Excel.createExcel();
+      final sheet = excel['History'];
+      final exportedRows = List<ExpenseTx>.from(rows)
+        ..sort((a, b) {
+          final categoryCompare =
+              a.category.toLowerCase().compareTo(b.category.toLowerCase());
+          if (categoryCompare != 0) {
+            return categoryCompare;
+          }
+          return a.date.compareTo(b.date);
+        });
+
+      sheet.appendRow([
+        TextCellValue('Coinzy Transaction History'),
+      ]);
+      sheet.appendRow([
+        TextCellValue(''),
+      ]);
+
+      final titleCell = sheet.cell(
+        CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 0),
+      );
+      titleCell.cellStyle = CellStyle(
+        bold: true,
+        fontSize: 20,
+      );
+
+      sheet.appendRow([
+        TextCellValue('Date'),
+        TextCellValue('Category'),
+        TextCellValue('Title'),
+        TextCellValue('Amount (${_currencyCode})'),
+      ]);
+
+      final categoryStyles = <String, CellStyle>{};
+      CellStyle styleForCategory(String category) {
+        return categoryStyles.putIfAbsent(category, () {
+          final chartColor = _categoryLineColors[category] ?? Colors.grey;
+          final backgroundHex =
+              chartColor.toARGB32().toRadixString(16).toUpperCase().padLeft(8, '0');
+          final fontColor = chartColor.computeLuminance() < 0.5
+              ? ExcelColor.white
+              : ExcelColor.black;
+
+          return CellStyle(
+            backgroundColorHex: ExcelColor.fromHexString(backgroundHex),
+            fontColorHex: fontColor,
+          );
+        });
+      }
+
+      for (var i = 0; i < exportedRows.length; i++) {
+        final tx = exportedRows[i];
+        sheet.appendRow([
+          TextCellValue(DateFormat('yyyy-MM-dd').format(tx.date)),
+          TextCellValue(tx.category),
+          TextCellValue(tx.title),
+          DoubleCellValue(tx.amount),
+        ]);
+
+        final categoryCell = sheet.cell(
+          CellIndex.indexByColumnRow(
+            columnIndex: 1,
+            rowIndex: i + 3,
+          ),
+        );
+        categoryCell.cellStyle = styleForCategory(tx.category);
+      }
+
+      final fileBytes = excel.save();
+      if (fileBytes == null || fileBytes.isEmpty) {
+        throw Exception('Unable to generate Excel file bytes.');
+      }
+
+        final exportDate = DateFormat('MM-dd-yyyy').format(DateTime.now());
+        final selectedCategory = _filterCategory == 'all'
+          ? null
+          : _filterCategory
+            .trim()
+            .replaceAll(RegExp(r'[<>:"/\\|?*]'), '')
+            .replaceAll(RegExp(r'\s+'), '_');
+        final fileName = selectedCategory == null || selectedCategory.isEmpty
+          ? 'History_Transaction_($exportDate)'
+          : 'History_Transaction_($selectedCategory)_($exportDate)';
+      final bytes = Uint8List.fromList(fileBytes);
+
+      String? savedPath;
+      try {
+        // Prefer Save As so users can choose a visible folder like Downloads.
+        savedPath = await FileSaver.instance.saveAs(
+          name: fileName,
+          bytes: bytes,
+          fileExtension: 'xlsx',
+          mimeType: MimeType.microsoftExcel,
+        );
+      } catch (_) {
+        savedPath = null;
+      }
+
+      if (savedPath == null || savedPath.trim().isEmpty) {
+        savedPath = await FileSaver.instance.saveFile(
+          name: fileName,
+          bytes: bytes,
+          fileExtension: 'xlsx',
+          mimeType: MimeType.microsoftExcel,
+        );
+      }
+
+      final normalizedPath = savedPath.trim();
+      if (normalizedPath.isEmpty ||
+          normalizedPath.toLowerCase().contains('something went wrong')) {
+        throw Exception('File saver did not return a valid save path.');
+      }
+
+      if (!mounted) {
+        return;
+      }
+
+      _showSweetNotification(
+        title: 'Export Successful',
+        message: 'Done! Your history Excel file is ready.',
+        icon: Icons.download_done_rounded,
+        backgroundColor: const Color(0xFF166534),
+        foregroundColor: Colors.white,
+        duration: const Duration(seconds: 3),
+      );
+    } catch (e) {
+      debugPrint('Error exporting history to Excel: $e');
+      if (!mounted) {
+        return;
+      }
+      _showSweetNotification(
+        title: 'Export Failed',
+        message: 'Could not export Excel file. Please try again.',
+        icon: Icons.error_outline_rounded,
+        backgroundColor: const Color(0xFFB91C1C),
+        foregroundColor: Colors.white,
+        duration: const Duration(seconds: 3),
+      );
+    }
   }
 
   Future<bool> _saveAllowance() async {

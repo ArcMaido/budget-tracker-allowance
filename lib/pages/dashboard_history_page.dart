@@ -113,6 +113,21 @@ extension _DashboardHistorySection on _AllowanceBudgetHomeState {
                               ),
                             )
                           else
+                            OutlinedButton.icon(
+                              onPressed: () => _exportHistoryToExcel(rows),
+                              icon: const Icon(Icons.table_view_outlined),
+                              label: const Text('Export Excel'),
+                            ),
+                          if (compact)
+                            SizedBox(
+                              width: constraints.maxWidth,
+                              child: FilledButton.icon(
+                                onPressed: () => _exportHistoryToExcel(rows),
+                                icon: const Icon(Icons.table_view_outlined),
+                                label: const Text('Export Excel'),
+                              ),
+                            )
+                          else
                             OutlinedButton(
                               onPressed: () {
                                 _runState(() {
