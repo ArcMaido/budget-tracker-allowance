@@ -34,6 +34,11 @@ extension _DashboardHistorySection on _AllowanceBudgetHomeState {
                             width: compact ? constraints.maxWidth : 220,
                             child: TextField(
                               controller: _searchController,
+                              onChanged: (_) {
+                                if (_historyPage != 0) {
+                                  _runState(() => _historyPage = 0);
+                                }
+                              },
                               decoration: const InputDecoration(
                                 labelText: 'Search by expense name',
                                 border: OutlineInputBorder(),
@@ -57,7 +62,10 @@ extension _DashboardHistorySection on _AllowanceBudgetHomeState {
                               ],
                               onChanged: (v) {
                                 if (v != null) {
-                                  _runState(() => _filterCategory = v);
+                                  _runState(() {
+                                    _filterCategory = v;
+                                    _historyPage = 0;
+                                  });
                                 }
                               },
                               decoration: const InputDecoration(
@@ -79,7 +87,10 @@ extension _DashboardHistorySection on _AllowanceBudgetHomeState {
                               ],
                               onChanged: (v) {
                                 if (v != null) {
-                                  _runState(() => _filterMonth = v);
+                                  _runState(() {
+                                    _filterMonth = v;
+                                    _historyPage = 0;
+                                  });
                                 }
                               },
                               decoration: const InputDecoration(
@@ -125,7 +136,11 @@ extension _DashboardHistorySection on _AllowanceBudgetHomeState {
                       builder: (context, constraints) {
                         final compact =
                             constraints.maxWidth < AppBreakpoints.compact;
-                        final start = _historyPage * _historyRowsPerPage;
+                      final maxPage = rows.isEmpty
+                        ? 0
+                        : ((rows.length - 1) ~/ _historyRowsPerPage);
+                      final currentPage = _historyPage.clamp(0, maxPage);
+                      final start = currentPage * _historyRowsPerPage;
                         final end =
                             math.min(start + _historyRowsPerPage, rows.length);
                         final paginatedRows = rows.sublist(start, end);
@@ -191,7 +206,7 @@ extension _DashboardHistorySection on _AllowanceBudgetHomeState {
                       Text(
                         rows.isEmpty
                             ? 'No rows'
-                            : 'Showing ${(_historyPage * _historyRowsPerPage) + 1} - ${math.min((_historyPage + 1) * _historyRowsPerPage, rows.length)} of ${rows.length}',
+                          : 'Showing ${((_historyPage.clamp(0, ((rows.length - 1) ~/ _historyRowsPerPage))) * _historyRowsPerPage) + 1} - ${math.min(((_historyPage.clamp(0, ((rows.length - 1) ~/ _historyRowsPerPage))) + 1) * _historyRowsPerPage, rows.length)} of ${rows.length}',
                         style: TextStyle(
                             color:
                                 Theme.of(context).colorScheme.onSurfaceVariant),
@@ -199,18 +214,46 @@ extension _DashboardHistorySection on _AllowanceBudgetHomeState {
                       Row(
                         children: [
                           IconButton(
-                            onPressed: _historyPage > 0
-                                ? () => _runState(() => _historyPage--)
+                          onPressed: _historyPage.clamp(
+                                0,
+                                rows.isEmpty
+                                  ? 0
+                                  : ((rows.length - 1) ~/
+                                    _historyRowsPerPage)) >
+                              0
+                            ? () => _runState(() => _historyPage =
+                              _historyPage
+                                  .clamp(
+                                    0,
+                                    rows.isEmpty
+                                      ? 0
+                                      : ((rows.length - 1) ~/
+                                        _historyRowsPerPage)) -
+                                1)
                                 : null,
                             icon: const Icon(Icons.chevron_left),
                           ),
                           Text(
-                              '${_historyPage + 1}/${rows.isEmpty ? 1 : ((rows.length - 1) ~/ _historyRowsPerPage) + 1}'),
+                            '${(_historyPage.clamp(0, rows.isEmpty ? 0 : ((rows.length - 1) ~/ _historyRowsPerPage))) + 1}/${rows.isEmpty ? 1 : ((rows.length - 1) ~/ _historyRowsPerPage) + 1}'),
                           IconButton(
-                            onPressed:
-                                ((_historyPage + 1) * _historyRowsPerPage) <
-                                        rows.length
-                                    ? () => _runState(() => _historyPage++)
+                          onPressed: ((_historyPage.clamp(
+                                    0,
+                                    rows.isEmpty
+                                      ? 0
+                                      : ((rows.length - 1) ~/
+                                        _historyRowsPerPage)) +
+                                  1) *
+                                _historyRowsPerPage) <
+                              rows.length
+                            ? () => _runState(() => _historyPage =
+                              _historyPage
+                                  .clamp(
+                                    0,
+                                    rows.isEmpty
+                                      ? 0
+                                      : ((rows.length - 1) ~/
+                                        _historyRowsPerPage)) +
+                                1)
                                     : null,
                             icon: const Icon(Icons.chevron_right),
                           ),
