@@ -2188,7 +2188,11 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
   }
 
   Widget _buildVisualsSection() {
-    final months = _recentMonths(12).reversed.toList();
+    final currentYear = DateTime.now().year;
+    final months = List<String>.generate(
+      12,
+      (index) => _monthKey(DateTime(currentYear, index + 1, 1)),
+    );
     final barValues = months
         .map((month) => _data.transactions
             .where((tx) => _monthKey(tx.date) == month)
@@ -2200,7 +2204,10 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
     final categories = _data.categories.keys.toList()..sort();
     final effectiveLineCategory =
         categories.contains(_lineChartCategory) ? _lineChartCategory : 'all';
-    final monthOptions = _recentMonths(12);
+    final monthOptions = List<String>.generate(
+      12,
+      (index) => _monthKey(DateTime(currentYear, index + 1, 1)),
+    );
     final effectiveLineMonth = monthOptions.contains(_lineChartMonth)
         ? _lineChartMonth
         : _nowMonthKey();
@@ -2295,9 +2302,67 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
             LayoutBuilder(
               builder: (context, constraints) {
                 final chartA = _ChartCard(
-                  title: '12-Month Spending (Bar)',
-                  child:
-                      MonthlyBarChart(values: barValues, labels: monthLabels),
+                  title: 'Yearly Spending (Bar)',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Center(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .surfaceContainerHighest
+                                .withValues(alpha: 0.55),
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(
+                              color:
+                                  Theme.of(context).colorScheme.outlineVariant,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.calendar_month_outlined,
+                                size: 14,
+                                color: Theme.of(context).colorScheme.primary,
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                '$currentYear',
+                                style: TextStyle(
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w800,
+                                  color: Theme.of(context).colorScheme.primary,
+                                  letterSpacing: 0.4,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                'Current Year',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w600,
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Expanded(
+                        child: MonthlyBarChart(
+                          values: barValues,
+                          labels: monthLabels,
+                        ),
+                      ),
+                    ],
+                  ),
                 );
                 final chartB = _ChartCard(
                   title: 'Spending Trend (Line graph)',

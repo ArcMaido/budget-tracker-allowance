@@ -309,7 +309,7 @@ extension _DashboardHistorySection on _AllowanceBudgetHomeState {
                               ),
                             )
                           else
-                            OutlinedButton(
+                            OutlinedButton.icon(
                               onPressed: () {
                                 _runState(() {
                                   _searchController.clear();
@@ -318,7 +318,14 @@ extension _DashboardHistorySection on _AllowanceBudgetHomeState {
                                   _historyPage = 0;
                                 });
                               },
-                              child: const Text('Clear'),
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 14, vertical: 12),
+                                minimumSize: const Size(0, 44),
+                                shape: const StadiumBorder(),
+                              ),
+                              icon: const Icon(Icons.clear_all_outlined),
+                              label: const Text('Clear'),
                             ),
                         ],
                       );

@@ -12,36 +12,37 @@ extension _DashboardCategoriesSection on _AllowanceBudgetHomeState {
 
     final names = _data.categories.keys.toList()..sort();
     final allowance = _allowanceForMonthKey(_nowMonthKey());
-    final totalCategoryBudget = _data.categories.values
-      .fold<double>(0, (sum, value) => sum + value);
+    final totalCategoryBudget =
+        _data.categories.values.fold<double>(0, (sum, value) => sum + value);
     final remainingAllowanceAfterBudgets = allowance - totalCategoryBudget;
     final allocationRate =
-      allowance > 0 ? (totalCategoryBudget / allowance) * 100 : 0.0;
-    final allocationRatio = allowance > 0 ? (totalCategoryBudget / allowance) : 0.0;
-    final statusGreen = const Color(0xFF166534);
+        allowance > 0 ? (totalCategoryBudget / allowance) * 100 : 0.0;
+    final allocationRatio =
+        allowance > 0 ? (totalCategoryBudget / allowance) : 0.0;
+    const statusGreen = Color(0xFF166534);
     final statusOrange = Colors.orange.shade700;
     final statusRed = scheme.error;
     final statusColor = allowance <= 0
-      ? scheme.onSurfaceVariant
-      : allocationRatio >= 1
-        ? statusRed
-        : allocationRatio >= 0.85
-          ? statusOrange
-          : statusGreen;
+        ? scheme.onSurfaceVariant
+        : allocationRatio >= 1
+            ? statusRed
+            : allocationRatio >= 0.85
+                ? statusOrange
+                : statusGreen;
     final statusText = allowance <= 0
-      ? 'Set allowance first'
-      : allocationRatio >= 1
-        ? 'Reached allowance'
-        : allocationRatio >= 0.85
-          ? 'Almost reached allowance'
-          : 'No need to worry';
+        ? 'Set allowance first'
+        : allocationRatio >= 1
+            ? 'Reached allowance'
+            : allocationRatio >= 0.85
+                ? 'Almost reached allowance'
+                : 'No need to worry';
     final remainingAllocationColor = allowance <= 0
-      ? scheme.onSurfaceVariant
-      : remainingAllowanceAfterBudgets <= 0
-        ? statusRed
-        : (remainingAllowanceAfterBudgets / allowance) <= 0.15
-          ? statusOrange
-          : statusGreen;
+        ? scheme.onSurfaceVariant
+        : remainingAllowanceAfterBudgets <= 0
+            ? statusRed
+            : (remainingAllowanceAfterBudgets / allowance) <= 0.15
+                ? statusOrange
+                : statusGreen;
     final minPanelHeight = MediaQuery.sizeOf(context).height * 0.62;
 
     return LayoutBuilder(
@@ -153,26 +154,30 @@ extension _DashboardCategoriesSection on _AllowanceBudgetHomeState {
                             child: Row(
                               children: [
                                 Expanded(
-                                  child: FilledButton(
+                                  child: FilledButton.icon(
                                     onPressed: _upsertCategory,
                                     style: FilledButton.styleFrom(
                                       padding: const EdgeInsets.symmetric(
-                                          vertical: 12),
-                                      minimumSize: const Size(0, 40),
+                                          horizontal: 14, vertical: 12),
+                                      minimumSize: const Size(0, 44),
+                                      shape: const StadiumBorder(),
                                     ),
-                                    child: const Text('Add / Update'),
+                                    icon: const Icon(Icons.save_outlined),
+                                    label: const Text('Add / Update'),
                                   ),
                                 ),
                                 const SizedBox(width: 6),
                                 Expanded(
-                                  child: OutlinedButton(
+                                  child: OutlinedButton.icon(
                                     onPressed: _removeCategory,
                                     style: OutlinedButton.styleFrom(
                                       padding: const EdgeInsets.symmetric(
-                                          vertical: 12),
-                                      minimumSize: const Size(0, 40),
+                                          horizontal: 14, vertical: 12),
+                                      minimumSize: const Size(0, 44),
+                                      shape: const StadiumBorder(),
                                     ),
-                                    child: const Text('Remove'),
+                                    icon: const Icon(Icons.delete_outline),
+                                    label: const Text('Remove'),
                                   ),
                                 ),
                               ],
@@ -208,7 +213,8 @@ extension _DashboardCategoriesSection on _AllowanceBudgetHomeState {
                                 final budget = _data.categories[name] ?? 0;
                                 final spent = spentByCategory[name] ?? 0;
                                 final remaining = budget - spent;
-                                final pct = budget > 0 ? (spent / budget) * 100 : 0.0;
+                                final pct =
+                                    budget > 0 ? (spent / budget) * 100 : 0.0;
                                 final usageColor = budget <= 0
                                     ? scheme.onSurfaceVariant
                                     : pct >= 100

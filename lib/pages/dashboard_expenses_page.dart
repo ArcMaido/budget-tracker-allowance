@@ -132,23 +132,29 @@ extension _DashboardExpensesSection on _AllowanceBudgetHomeState {
                     if (compact)
                       SizedBox(
                         width: constraints.maxWidth,
-                        child: FilledButton(
+                        child: FilledButton.icon(
                           onPressed: categoryNames.isEmpty ? null : _addExpense,
                           style: FilledButton.styleFrom(
-                              padding:
-                                  const EdgeInsets.symmetric(vertical: 12)),
-                          child: const Text('Add Expense'),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 12),
+                            minimumSize: const Size(0, 44),
+                            shape: const StadiumBorder(),
+                          ),
+                          icon: const Icon(Icons.add_circle_outline),
+                          label: const Text('Add Expense'),
                         ),
                       )
                     else
-                      FilledButton(
+                      FilledButton.icon(
                         onPressed: categoryNames.isEmpty ? null : _addExpense,
                         style: FilledButton.styleFrom(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 12),
-                          minimumSize: const Size(0, 38),
+                              horizontal: 14, vertical: 12),
+                          minimumSize: const Size(0, 44),
+                          shape: const StadiumBorder(),
                         ),
-                        child: const Text('Add Expense'),
+                        icon: const Icon(Icons.add_circle_outline),
+                        label: const Text('Add Expense'),
                       ),
                   ],
                 );
