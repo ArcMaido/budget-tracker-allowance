@@ -90,7 +90,7 @@ extension _DashboardAboutSection on _AllowanceBudgetHomeState {
             const Text('Coinzy', style: TextStyle(fontWeight: FontWeight.w700)),
             const SizedBox(height: 6),
             const Text(
-                'This app helps students track monthly allowance, categorize expenses, and review spending trends with simple and clear sections.'),
+                'Coinzy helps anyone manage spending, set budgets, track expenses, and review money habits with simple, clear sections.'),
             const SizedBox(height: 8),
             const Text('Steps', style: TextStyle(fontWeight: FontWeight.w700)),
             const SizedBox(height: 8),
@@ -112,11 +112,11 @@ extension _DashboardAboutSection on _AllowanceBudgetHomeState {
                   runSpacing: 10,
                   children: const [
                     _GuideCard(
-                      icon: Icons.account_balance_wallet_outlined,
-                      step: 'Step 1',
-                      title: 'Set your starting budget',
-                      body:
-                          'Enter the amount you want to manage so the app can track it for you.'),
+                        icon: Icons.account_balance_wallet_outlined,
+                        step: 'Step 1',
+                        title: 'Set your starting budget',
+                        body:
+                            'Enter the amount you want to manage so the app can track it for you.'),
                     _GuideCard(
                         icon: Icons.receipt_long_outlined,
                         step: 'Step 2',

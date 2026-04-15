@@ -731,6 +731,12 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
       final excel = Excel.createExcel();
       final sheet = excel['History'];
       final exportedRows = _sortedHistoryRowsForExport(rows);
+      final totalSpent =
+          exportedRows.fold<double>(0, (sum, tx) => sum + tx.amount);
+      final categoryCount =
+          exportedRows.map((tx) => tx.category).toSet().length;
+      final firstDate = exportedRows.first.date;
+      final lastDate = exportedRows.last.date;
 
       excel.merge(
         'History',
@@ -742,6 +748,31 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
         TextCellValue(''),
       ]);
 
+      excel.merge(
+        'History',
+        CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 1),
+        CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: 1),
+        customValue: TextCellValue(
+          'Allowance and spending export • ${DateFormat('MMM d, yyyy').format(DateTime.now())}',
+        ),
+      );
+
+      sheet.appendRow([
+        TextCellValue('Transactions'),
+        TextCellValue(exportedRows.length.toString()),
+        TextCellValue('Total Spent'),
+        TextCellValue(_money(totalSpent)),
+      ]);
+
+      sheet.appendRow([
+        TextCellValue('Categories'),
+        TextCellValue(categoryCount.toString()),
+        TextCellValue('Range'),
+        TextCellValue(
+          '${DateFormat('MMM d').format(firstDate)} - ${DateFormat('MMM d').format(lastDate)}',
+        ),
+      ]);
+
       final titleCell = sheet.cell(
         CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 0),
       );
@@ -750,7 +781,46 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
         fontSize: 20,
         horizontalAlign: HorizontalAlign.Center,
         verticalAlign: VerticalAlign.Center,
+        backgroundColorHex: ExcelColor.fromHexString('FF1A7A59'),
+        fontColorHex: ExcelColor.white,
       );
+
+      final subtitleCell = sheet.cell(
+        CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 1),
+      );
+      subtitleCell.cellStyle = CellStyle(
+        bold: true,
+        fontSize: 11,
+        horizontalAlign: HorizontalAlign.Center,
+        verticalAlign: VerticalAlign.Center,
+        backgroundColorHex: ExcelColor.fromHexString('FFE2EFE8'),
+        fontColorHex: ExcelColor.fromHexString('FF1A7A59'),
+      );
+
+      final summaryLabelsStyle = CellStyle(
+        bold: true,
+        horizontalAlign: HorizontalAlign.Center,
+        verticalAlign: VerticalAlign.Center,
+        backgroundColorHex: ExcelColor.fromHexString('FFE2EFE8'),
+        fontColorHex: ExcelColor.fromHexString('FF1A7A59'),
+      );
+      final summaryValuesStyle = CellStyle(
+        bold: true,
+        horizontalAlign: HorizontalAlign.Center,
+        verticalAlign: VerticalAlign.Center,
+        backgroundColorHex: ExcelColor.fromHexString('FFF7FBF8'),
+      );
+
+      for (var col = 0; col < 4; col++) {
+        sheet
+            .cell(CellIndex.indexByColumnRow(columnIndex: col, rowIndex: 2))
+            .cellStyle = col.isEven ? summaryLabelsStyle : summaryValuesStyle;
+      }
+      for (var col = 0; col < 4; col++) {
+        sheet
+            .cell(CellIndex.indexByColumnRow(columnIndex: col, rowIndex: 3))
+            .cellStyle = col.isEven ? summaryLabelsStyle : summaryValuesStyle;
+      }
 
       sheet.appendRow([
         TextCellValue('Date'),
@@ -763,6 +833,8 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
         bold: true,
         horizontalAlign: HorizontalAlign.Center,
         verticalAlign: VerticalAlign.Center,
+        backgroundColorHex: ExcelColor.fromHexString('FF1A7A59'),
+        fontColorHex: ExcelColor.white,
       );
       final dataCellStyle = CellStyle(
         horizontalAlign: HorizontalAlign.Center,
@@ -770,7 +842,7 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
       );
       for (var col = 0; col < 4; col++) {
         sheet
-            .cell(CellIndex.indexByColumnRow(columnIndex: col, rowIndex: 2))
+            .cell(CellIndex.indexByColumnRow(columnIndex: col, rowIndex: 4))
             .cellStyle = headerCellStyle;
       }
 
@@ -808,19 +880,19 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
         final categoryCell = sheet.cell(
           CellIndex.indexByColumnRow(
             columnIndex: 1,
-            rowIndex: i + 3,
+            rowIndex: i + 5,
           ),
         );
         categoryCell.cellStyle = styleForCategory(tx.category);
 
         sheet
-            .cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: i + 3))
+            .cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: i + 5))
             .cellStyle = dataCellStyle;
         sheet
-            .cell(CellIndex.indexByColumnRow(columnIndex: 2, rowIndex: i + 3))
+            .cell(CellIndex.indexByColumnRow(columnIndex: 2, rowIndex: i + 5))
             .cellStyle = dataCellStyle;
         sheet
-            .cell(CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: i + 3))
+            .cell(CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: i + 5))
             .cellStyle = dataCellStyle;
       }
 
@@ -893,6 +965,11 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
     try {
       final exportedRows = _sortedHistoryRowsForExport(rows);
       final pdf = pw.Document();
+      final totalSpent =
+          exportedRows.fold<double>(0, (sum, tx) => sum + tx.amount);
+      final categoryCount =
+          exportedRows.map((tx) => tx.category).toSet().length;
+      final exportDateLabel = DateFormat('MMM d, yyyy').format(DateTime.now());
 
       pw.Widget plainCell(String value) {
         return pw.Padding(
@@ -902,6 +979,47 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
               value,
               textAlign: pw.TextAlign.center,
               style: const pw.TextStyle(fontSize: 10),
+            ),
+          ),
+        );
+      }
+
+      pw.Widget buildSummaryCard({
+        required String title,
+        required String value,
+      }) {
+        return pw.Expanded(
+          child: pw.Container(
+            padding: const pw.EdgeInsets.all(12),
+            decoration: pw.BoxDecoration(
+              color: PdfColor.fromInt(const Color(0xFFE2EFE8).toARGB32()),
+              borderRadius: pw.BorderRadius.circular(12),
+              border: pw.Border.all(
+                color: PdfColor.fromInt(const Color(0xFF1A7A59).toARGB32()),
+                width: 0.8,
+              ),
+            ),
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Text(
+                  title,
+                  style: pw.TextStyle(
+                    fontSize: 10,
+                    color: PdfColor.fromInt(const Color(0xFF1A7A59).toARGB32()),
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+                pw.SizedBox(height: 4),
+                pw.Text(
+                  value,
+                  style: pw.TextStyle(
+                    fontSize: 13,
+                    fontWeight: pw.FontWeight.bold,
+                    color: PdfColors.black,
+                  ),
+                ),
+              ],
             ),
           ),
         );
@@ -931,16 +1049,79 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
         pw.MultiPage(
           pageFormat: PdfPageFormat.a4,
           build: (context) => [
-            pw.Text(
-              'Coinzy Transaction History',
-              style: pw.TextStyle(
-                fontSize: 22,
-                fontWeight: pw.FontWeight.bold,
+            pw.Container(
+              padding: const pw.EdgeInsets.all(16),
+              decoration: pw.BoxDecoration(
+                color: PdfColor.fromInt(const Color(0xFF1A7A59).toARGB32()),
+                borderRadius: pw.BorderRadius.circular(16),
+              ),
+              child: pw.Row(
+                children: [
+                  pw.Container(
+                    width: 52,
+                    height: 52,
+                    decoration: pw.BoxDecoration(
+                      color: PdfColors.white,
+                      borderRadius: pw.BorderRadius.circular(16),
+                    ),
+                    child: pw.Center(
+                      child: pw.Text(
+                        'C',
+                        style: pw.TextStyle(
+                          fontSize: 24,
+                          fontWeight: pw.FontWeight.bold,
+                          color: PdfColor.fromInt(
+                              const Color(0xFF1A7A59).toARGB32()),
+                        ),
+                      ),
+                    ),
+                  ),
+                  pw.SizedBox(width: 12),
+                  pw.Expanded(
+                    child: pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      children: [
+                        pw.Text(
+                          'Coinzy Transaction History',
+                          style: pw.TextStyle(
+                            fontSize: 22,
+                            fontWeight: pw.FontWeight.bold,
+                            color: PdfColors.white,
+                          ),
+                        ),
+                        pw.SizedBox(height: 4),
+                        pw.Text(
+                          'Allowance and spending export • $exportDateLabel',
+                          style: const pw.TextStyle(
+                            fontSize: 11,
+                            color: PdfColors.white,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
             ),
-            pw.SizedBox(height: 8),
-            pw.Text(
-                'Exported on ${DateFormat('MM-dd-yyyy').format(DateTime.now())}'),
+            pw.SizedBox(height: 12),
+            pw.Row(
+              children: [
+                buildSummaryCard(
+                  title: 'Transactions',
+                  value: exportedRows.length.toString(),
+                ),
+                pw.SizedBox(width: 8),
+                buildSummaryCard(
+                  title: 'Total Spent',
+                  value: _money(totalSpent),
+                ),
+                pw.SizedBox(width: 8),
+                buildSummaryCard(
+                  title: 'Categories',
+                  value: categoryCount.toString(),
+                ),
+              ],
+            ),
             pw.SizedBox(height: 14),
             pw.Table(
               tableWidth: pw.TableWidth.min,
@@ -955,10 +1136,26 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
                 pw.TableRow(
                   decoration: const pw.BoxDecoration(color: PdfColors.grey300),
                   children: [
-                    plainCell('Date'),
-                    plainCell('Category'),
-                    plainCell('Title'),
-                    plainCell('Amount ($_currencyCode)'),
+                    pw.Container(
+                      color:
+                          PdfColor.fromInt(const Color(0xFFE2EFE8).toARGB32()),
+                      child: plainCell('Date'),
+                    ),
+                    pw.Container(
+                      color:
+                          PdfColor.fromInt(const Color(0xFFE2EFE8).toARGB32()),
+                      child: plainCell('Category'),
+                    ),
+                    pw.Container(
+                      color:
+                          PdfColor.fromInt(const Color(0xFFE2EFE8).toARGB32()),
+                      child: plainCell('Title'),
+                    ),
+                    pw.Container(
+                      color:
+                          PdfColor.fromInt(const Color(0xFFE2EFE8).toARGB32()),
+                      child: plainCell('Amount ($_currencyCode)'),
+                    ),
                   ],
                 ),
                 ...exportedRows.map((tx) {
@@ -1699,6 +1896,8 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
     Widget section;
     switch (_selectedNavIndex) {
       case 0:
+        final scheme = Theme.of(context).colorScheme;
+        final today = DateTime.now();
         section = Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -1708,14 +1907,99 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
                   'See your allowance status, spending trends, and quick insights at a glance.',
             ),
             const SizedBox(height: 8),
-            Center(
-              child: Text(
-                DateFormat('EEEE, MMM d, yyyy').format(DateTime.now()),
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+            Card(
+              elevation: 0,
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      scheme.primary.withValues(alpha: 0.16),
+                      scheme.primaryContainer.withValues(alpha: 0.35),
+                    ],
+                  ),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: scheme.primary.withValues(alpha: 0.22),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 68,
+                      height: 68,
+                      decoration: BoxDecoration(
+                        color: scheme.primary,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            DateFormat('EEE').format(today).toUpperCase(),
+                            style: TextStyle(
+                              color: scheme.onPrimary,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.8,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            DateFormat('d').format(today),
+                            style: TextStyle(
+                              color: scheme.onPrimary,
+                              fontSize: 24,
+                              fontWeight: FontWeight.w800,
+                              height: 1,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Live today',
+                            style: Theme.of(context)
+                                .textTheme
+                                .labelLarge
+                                ?.copyWith(
+                                  color: scheme.primary,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            DateFormat('EEEE, MMMM d, yyyy').format(today),
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleMedium
+                                ?.copyWith(
+                                  fontWeight: FontWeight.w800,
+                                ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            DateFormat('MMMM yyyy').format(today),
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodyMedium
+                                ?.copyWith(
+                                  color: scheme.onSurfaceVariant,
+                                ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
             const SizedBox(height: 10),
