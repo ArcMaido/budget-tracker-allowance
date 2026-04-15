@@ -33,21 +33,32 @@ Future<void> main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
-  runApp(const CoinzyApp());
+  final prefs = await SharedPreferences.getInstance();
+  runApp(CoinzyApp(initialDarkMode: prefs.getBool('darkMode') ?? false));
 }
 
 class CoinzyApp extends StatefulWidget {
-  const CoinzyApp({super.key});
+  const CoinzyApp({super.key, required this.initialDarkMode});
+
+  final bool initialDarkMode;
 
   @override
   State<CoinzyApp> createState() => _CoinzyAppState();
 }
 
 class _CoinzyAppState extends State<CoinzyApp> {
-  bool _isDarkMode = false;
+  late bool _isDarkMode;
 
-  void _toggleDarkMode(bool value) {
+  @override
+  void initState() {
+    super.initState();
+    _isDarkMode = widget.initialDarkMode;
+  }
+
+  Future<void> _toggleDarkMode(bool value) async {
     setState(() => _isDarkMode = value);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('darkMode', value);
   }
 
   Future<void> _completeOnboardingAndRefresh() async {
@@ -93,7 +104,8 @@ class _CoinzyAppState extends State<CoinzyApp> {
           return FutureBuilder<bool>(
             future: AuthService.isNewUser(),
             builder: (context, onboardingSnapshot) {
-              if (onboardingSnapshot.connectionState == ConnectionState.waiting) {
+              if (onboardingSnapshot.connectionState ==
+                  ConnectionState.waiting) {
                 return const Scaffold(
                   body: Center(child: CircularProgressIndicator()),
                 );
@@ -206,7 +218,7 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
   int _summaryMonth = DateTime.now().month;
   int _summaryStartDay = 1;
   int _monthlyPage = 0;
-  int _historyRowsPerPage = 10;
+  final int _historyRowsPerPage = 10;
   int _historyPage = 0;
   bool _monthlyShowAllowance = true;
   bool _monthlyShowSpent = true;
@@ -401,8 +413,8 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
     if (used.isEmpty) {
       return true;
     }
-    return used
-        .every((existing) => _colorDistance(candidate, existing) >= minDistance);
+    return used.every(
+        (existing) => _colorDistance(candidate, existing) >= minDistance);
   }
 
   double _minDistanceToUsed(Color candidate, Set<Color> used) {
@@ -744,7 +756,7 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
         TextCellValue('Date'),
         TextCellValue('Category'),
         TextCellValue('Title'),
-        TextCellValue('Amount (${_currencyCode})'),
+        TextCellValue('Amount ($_currencyCode)'),
       ]);
 
       final headerCellStyle = CellStyle(
@@ -766,8 +778,11 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
       CellStyle styleForCategory(String category) {
         return categoryStyles.putIfAbsent(category, () {
           final chartColor = _categoryLineColors[category] ?? Colors.grey;
-          final backgroundHex =
-              chartColor.toARGB32().toRadixString(16).toUpperCase().padLeft(8, '0');
+          final backgroundHex = chartColor
+              .toARGB32()
+              .toRadixString(16)
+              .toUpperCase()
+              .padLeft(8, '0');
           final fontColor = chartColor.computeLuminance() < 0.5
               ? ExcelColor.white
               : ExcelColor.black;
@@ -812,9 +827,10 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
       var maxDateLen = 'Date'.length;
       var maxCategoryLen = 'Category'.length;
       var maxTitleLen = 'Title'.length;
-      var maxAmountLen = 'Amount (${_currencyCode})'.length;
+      var maxAmountLen = 'Amount ($_currencyCode)'.length;
       for (final tx in exportedRows) {
-        maxDateLen = math.max(maxDateLen, DateFormat('yyyy-MM-dd').format(tx.date).length);
+        maxDateLen = math.max(
+            maxDateLen, DateFormat('yyyy-MM-dd').format(tx.date).length);
         maxCategoryLen = math.max(maxCategoryLen, tx.category.length);
         maxTitleLen = math.max(maxTitleLen, tx.title.length);
         maxAmountLen = math.max(maxAmountLen, _money(tx.amount).length);
@@ -894,8 +910,9 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
       pw.Widget categoryCell(String category) {
         final chartColor = _categoryLineColors[category] ?? Colors.grey;
         final bgColor = PdfColor.fromInt(chartColor.toARGB32());
-        final fgColor =
-            chartColor.computeLuminance() < 0.5 ? PdfColors.white : PdfColors.black;
+        final fgColor = chartColor.computeLuminance() < 0.5
+            ? PdfColors.white
+            : PdfColors.black;
 
         return pw.Container(
           color: bgColor,
@@ -922,7 +939,8 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
               ),
             ),
             pw.SizedBox(height: 8),
-            pw.Text('Exported on ${DateFormat('MM-dd-yyyy').format(DateTime.now())}'),
+            pw.Text(
+                'Exported on ${DateFormat('MM-dd-yyyy').format(DateTime.now())}'),
             pw.SizedBox(height: 14),
             pw.Table(
               tableWidth: pw.TableWidth.min,
@@ -940,7 +958,7 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
                     plainCell('Date'),
                     plainCell('Category'),
                     plainCell('Title'),
-                    plainCell('Amount (${_currencyCode})'),
+                    plainCell('Amount ($_currencyCode)'),
                   ],
                 ),
                 ...exportedRows.map((tx) {
@@ -1126,21 +1144,25 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
     final existed = existingKey != null;
     final currentBudget = existed ? (_data.categories[targetKey] ?? 0) : null;
 
-    if (existed && currentBudget != null && (currentBudget - budget).abs() < 0.0001) {
-      _showHint('No changes detected. The category budget is already set to this amount.');
+    if (existed &&
+        currentBudget != null &&
+        (currentBudget - budget).abs() < 0.0001) {
+      _showHint(
+          'No changes detected. The category budget is already set to this amount.');
       return;
     }
 
     final allowanceMonthLabel = DateFormat('MMM yyyy').format(DateTime.now());
     final currentMonthAllowance = _allowanceForMonthKey(_nowMonthKey());
-    final existingTotalCategoryBudget = _data.categories.values
-        .fold<double>(0, (sum, value) => sum + value);
+    final existingTotalCategoryBudget =
+        _data.categories.values.fold<double>(0, (sum, value) => sum + value);
     final projectedTotalCategoryBudget =
         existingTotalCategoryBudget - (currentBudget ?? 0) + budget;
 
     if (currentMonthAllowance > 0 &&
         projectedTotalCategoryBudget > currentMonthAllowance) {
-      final remainingAllowance = currentMonthAllowance - existingTotalCategoryBudget;
+      final remainingAllowance =
+          currentMonthAllowance - existingTotalCategoryBudget;
       final shouldContinue = await _showCategoryAllowanceWarning(
         category: targetKey,
         categoryBudget: budget,
@@ -1279,7 +1301,8 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
                   const SizedBox(height: 2),
                   Text(
                     message,
-                    style: TextStyle(color: foregroundColor.withValues(alpha: 0.95)),
+                    style: TextStyle(
+                        color: foregroundColor.withValues(alpha: 0.95)),
                   ),
                 ],
               ),
@@ -1916,9 +1939,7 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
 
     final lineSeries = selectedSeriesNames
         .map((name) {
-          final categoryTx = weekTx
-              .where((tx) => tx.category == name)
-              .toList()
+          final categoryTx = weekTx.where((tx) => tx.category == name).toList()
             ..sort((a, b) => a.date.compareTo(b.date));
           if (categoryTx.isEmpty) {
             return _LineSeries(name: name, values: const <double>[]);
@@ -1966,61 +1987,6 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
                 );
                 final chartB = _ChartCard(
                   title: 'Weekly Spending Trend (Line graph)',
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Align(
-                        alignment: Alignment.center,
-                        child: PopupMenuButton<int>(
-                          onSelected: (value) {
-                            setState(() => _lineChartWeek = value);
-                          },
-                          itemBuilder: (context) => weekRanges
-                              .map(
-                                (week) => PopupMenuItem<int>(
-                                  value: week.weekNumber,
-                                  child: Text(week.label,
-                                      overflow: TextOverflow.ellipsis),
-                                ),
-                              )
-                              .toList(),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 6),
-                            decoration: BoxDecoration(
-                              border: Border.all(
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .outlineVariant),
-                              borderRadius: BorderRadius.circular(999),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(Icons.calendar_view_week_outlined,
-                                    size: 18),
-                                const SizedBox(width: 6),
-                                Text(selectedWeek.label),
-                                const SizedBox(width: 4),
-                                const Icon(Icons.arrow_drop_down, size: 18),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Expanded(
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 4),
-                          child: MonthlyLineChart(
-                            series: lineSeries,
-                            labels: lineLabels,
-                            lineColors: lineColors,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
                   footer: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -2091,6 +2057,61 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
                             ),
                           ),
                         ],
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Align(
+                        alignment: Alignment.center,
+                        child: PopupMenuButton<int>(
+                          onSelected: (value) {
+                            setState(() => _lineChartWeek = value);
+                          },
+                          itemBuilder: (context) => weekRanges
+                              .map(
+                                (week) => PopupMenuItem<int>(
+                                  value: week.weekNumber,
+                                  child: Text(week.label,
+                                      overflow: TextOverflow.ellipsis),
+                                ),
+                              )
+                              .toList(),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              border: Border.all(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .outlineVariant),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.calendar_view_week_outlined,
+                                    size: 18),
+                                const SizedBox(width: 6),
+                                Text(selectedWeek.label),
+                                const SizedBox(width: 4),
+                                const Icon(Icons.arrow_drop_down, size: 18),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          child: MonthlyLineChart(
+                            series: lineSeries,
+                            labels: lineLabels,
+                            lineColors: lineColors,
+                          ),
+                        ),
                       ),
                     ],
                   ),
