@@ -1123,6 +1123,13 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
       _expenseAmountController.clear();
     });
     await _save();
+    _showSweetNotification(
+      title: 'Expense Added',
+      message: '$title was added under $category.',
+      icon: Icons.check_circle_outline_rounded,
+      backgroundColor: const Color(0xFF166534),
+      foregroundColor: Colors.white,
+    );
     unawaited(DataService.saveTransaction(
       category: tx.category,
       amount: tx.amount,
@@ -1695,6 +1702,23 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
         section = Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            _buildSectionHeading(
+              title: 'Overview',
+              subtitle:
+                  'See your allowance status, spending trends, and quick insights at a glance.',
+            ),
+            const SizedBox(height: 8),
+            Center(
+              child: Text(
+                DateFormat('EEEE, MMM d, yyyy').format(DateTime.now()),
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+              ),
+            ),
+            const SizedBox(height: 10),
             _buildSummary(stats),
             const SizedBox(height: 10),
             _buildVisualsSection(),
@@ -3007,6 +3031,15 @@ class _SettingsPageState extends State<SettingsPage> {
       body: ListView(
         padding: const EdgeInsets.all(12),
         children: [
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(
+              'Adjust currency, appearance, and account security from one place.',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+            ),
+          ),
           Card(
             child: ListTile(
               leading: Container(

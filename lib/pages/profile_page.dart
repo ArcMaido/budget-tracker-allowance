@@ -392,8 +392,9 @@ class _ProfilePageState extends State<ProfilePage> {
   void _showMessage(String message, {bool isSuccess = false}) {
     if (!mounted) return;
     final messenger = ScaffoldMessenger.of(context);
-    final bgColor = isSuccess ? const Color(0xFF166534) : const Color(0xFFB91C1C);
-    final fgColor = Colors.white;
+    final bgColor =
+        isSuccess ? const Color(0xFF166534) : const Color(0xFFB91C1C);
+    const fgColor = Colors.white;
 
     messenger.removeCurrentSnackBar();
     messenger.showSnackBar(
@@ -408,7 +409,9 @@ class _ProfilePageState extends State<ProfilePage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Icon(
-              isSuccess ? Icons.check_circle_rounded : Icons.error_outline_rounded,
+              isSuccess
+                  ? Icons.check_circle_rounded
+                  : Icons.error_outline_rounded,
               color: fgColor,
               size: 22,
             ),
@@ -454,7 +457,7 @@ class _ProfilePageState extends State<ProfilePage> {
         duration: const Duration(seconds: 2),
         margin: const EdgeInsets.fromLTRB(16, 0, 16, 20),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        content: Row(
+        content: const Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             SizedBox(
@@ -462,15 +465,15 @@ class _ProfilePageState extends State<ProfilePage> {
               height: 22,
               child: CircularProgressIndicator(
                 strokeWidth: 2.4,
-                valueColor: const AlwaysStoppedAnimation<Color>(fgColor),
+                valueColor: AlwaysStoppedAnimation<Color>(fgColor),
               ),
             ),
-            const SizedBox(width: 10),
+            SizedBox(width: 10),
             Expanded(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
-                children: const [
+                children: [
                   Text(
                     'Saving',
                     style: TextStyle(
@@ -530,6 +533,15 @@ class _ProfilePageState extends State<ProfilePage> {
       body: ListView(
         padding: const EdgeInsets.all(12),
         children: [
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(
+              'Keep your profile details up to date so your account stays easy to recognize.',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+            ),
+          ),
           // Edit Form
           if (_isEditing)
             Card(
