@@ -28,6 +28,53 @@ extension _DashboardHistorySection on _AllowanceBudgetHomeState {
                           constraints.maxWidth < AppBreakpoints.compact;
                       const excelBrand = Color(0xFF217346);
                       const pdfBrand = Color(0xFFE53935);
+                      Widget buildFilterControl({
+                        required IconData icon,
+                        required String label,
+                        required String value,
+                        required List<DropdownMenuItem<String>> items,
+                        required ValueChanged<String?> onChanged,
+                      }) {
+                        final scheme = Theme.of(context).colorScheme;
+                        return Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: scheme.surfaceContainerHighest
+                                .withValues(alpha: 0.55),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: scheme.outlineVariant),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(icon, size: 14, color: scheme.primary),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    label,
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                      color: scheme.primary,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              DropdownButtonHideUnderline(
+                                child: DropdownButton<String>(
+                                  isExpanded: true,
+                                  value: value,
+                                  onChanged: onChanged,
+                                  items: items,
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }
+
                       return Wrap(
                         spacing: 10,
                         runSpacing: 10,
@@ -49,54 +96,140 @@ extension _DashboardHistorySection on _AllowanceBudgetHomeState {
                             ),
                           ),
                           SizedBox(
-                            width: compact ? constraints.maxWidth : 180,
-                            child: DropdownButtonFormField<String>(
-                              isExpanded: true,
-                              initialValue: _filterCategory,
-                              items: [
-                                const DropdownMenuItem(
-                                    value: 'all',
-                                    child: Text('All categories')),
-                                ...categories.map((c) => DropdownMenuItem(
-                                    value: c,
-                                    child: Text(c,
-                                        overflow: TextOverflow.ellipsis))),
+                            width: compact ? constraints.maxWidth : 380,
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: buildFilterControl(
+                                    icon: Icons.pie_chart_outline,
+                                    label: 'Category',
+                                    value: _filterCategory,
+                                    items: [
+                                      DropdownMenuItem(
+                                        value: 'all',
+                                        child: Row(
+                                          children: [
+                                            Icon(
+                                              Icons.auto_graph,
+                                              size: 16,
+                                              color: Theme.of(context)
+                                                  .colorScheme
+                                                  .primary,
+                                            ),
+                                            const SizedBox(width: 8),
+                                            const Expanded(
+                                              child: Text(
+                                                'All categories',
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      ...categories.map(
+                                        (c) => DropdownMenuItem(
+                                          value: c,
+                                          child: Row(
+                                            children: [
+                                              Container(
+                                                width: 10,
+                                                height: 10,
+                                                decoration: BoxDecoration(
+                                                  color: _categoryLineColors[
+                                                          c] ??
+                                                      _AllowanceBudgetHomeState
+                                                          ._categoryLineSeedColors
+                                                          .first,
+                                                  shape: BoxShape.circle,
+                                                ),
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Expanded(
+                                                child: Text(
+                                                  c,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                    onChanged: (v) {
+                                      if (v != null) {
+                                        _runState(() {
+                                          _filterCategory = v;
+                                          _historyPage = 0;
+                                        });
+                                      }
+                                    },
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: buildFilterControl(
+                                    icon: Icons.calendar_month_outlined,
+                                    label: 'Month',
+                                    value: _filterMonth,
+                                    items: [
+                                      DropdownMenuItem(
+                                        value: 'all',
+                                        child: Row(
+                                          children: [
+                                            Icon(
+                                              Icons.calendar_today_outlined,
+                                              size: 16,
+                                              color: Theme.of(context)
+                                                  .colorScheme
+                                                  .primary,
+                                            ),
+                                            const SizedBox(width: 8),
+                                            const Expanded(
+                                              child: Text(
+                                                'All months',
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      ...months.map(
+                                        (m) => DropdownMenuItem(
+                                          value: m,
+                                          child: Row(
+                                            children: [
+                                              Icon(
+                                                Icons.calendar_month,
+                                                size: 16,
+                                                color: Theme.of(context)
+                                                    .colorScheme
+                                                    .primary,
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Expanded(
+                                                child: Text(
+                                                  _monthLabel(m),
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                    onChanged: (v) {
+                                      if (v != null) {
+                                        _runState(() {
+                                          _filterMonth = v;
+                                          _historyPage = 0;
+                                        });
+                                      }
+                                    },
+                                  ),
+                                ),
                               ],
-                              onChanged: (v) {
-                                if (v != null) {
-                                  _runState(() {
-                                    _filterCategory = v;
-                                    _historyPage = 0;
-                                  });
-                                }
-                              },
-                              decoration: const InputDecoration(
-                                  border: OutlineInputBorder()),
-                            ),
-                          ),
-                          SizedBox(
-                            width: compact ? constraints.maxWidth : 180,
-                            child: DropdownButtonFormField<String>(
-                              isExpanded: true,
-                              initialValue: _filterMonth,
-                              items: [
-                                const DropdownMenuItem(
-                                    value: 'all', child: Text('All months')),
-                                ...months.map((m) => DropdownMenuItem(
-                                    value: m,
-                                    child: Text(_monthLabel(m),
-                                        overflow: TextOverflow.ellipsis))),
-                              ],
-                              onChanged: (v) {
-                                if (v != null) {
-                                  _runState(() {
-                                    _filterMonth = v;
-                                    _historyPage = 0;
-                                  });
-                                }
-                              },
-                              decoration: const InputDecoration(
-                                  border: OutlineInputBorder()),
                             ),
                           ),
                           if (compact)
@@ -106,24 +239,28 @@ extension _DashboardHistorySection on _AllowanceBudgetHomeState {
                                 children: [
                                   Expanded(
                                     child: FilledButton.icon(
-                                      onPressed: () => _exportHistoryToExcel(rows),
+                                      onPressed: () =>
+                                          _exportHistoryToExcel(rows),
                                       style: FilledButton.styleFrom(
                                         backgroundColor: excelBrand,
                                         foregroundColor: Colors.white,
                                       ),
-                                      icon: const Icon(Icons.table_view_outlined),
+                                      icon:
+                                          const Icon(Icons.table_view_outlined),
                                       label: const Text('Export Excel'),
                                     ),
                                   ),
                                   const SizedBox(width: 8),
                                   Expanded(
                                     child: FilledButton.icon(
-                                      onPressed: () => _exportHistoryToPdf(rows),
+                                      onPressed: () =>
+                                          _exportHistoryToPdf(rows),
                                       style: FilledButton.styleFrom(
                                         backgroundColor: pdfBrand,
                                         foregroundColor: Colors.white,
                                       ),
-                                      icon: const Icon(Icons.picture_as_pdf_outlined),
+                                      icon: const Icon(
+                                          Icons.picture_as_pdf_outlined),
                                       label: const Text('Export PDF'),
                                     ),
                                   ),
@@ -150,7 +287,8 @@ extension _DashboardHistorySection on _AllowanceBudgetHomeState {
                                     backgroundColor: pdfBrand,
                                     foregroundColor: Colors.white,
                                   ),
-                                  icon: const Icon(Icons.picture_as_pdf_outlined),
+                                  icon:
+                                      const Icon(Icons.picture_as_pdf_outlined),
                                   label: const Text('Export PDF'),
                                 ),
                               ],
@@ -194,11 +332,11 @@ extension _DashboardHistorySection on _AllowanceBudgetHomeState {
                       builder: (context, constraints) {
                         final compact =
                             constraints.maxWidth < AppBreakpoints.compact;
-                      final maxPage = rows.isEmpty
-                        ? 0
-                        : ((rows.length - 1) ~/ _historyRowsPerPage);
-                      final currentPage = _historyPage.clamp(0, maxPage);
-                      final start = currentPage * _historyRowsPerPage;
+                        final maxPage = rows.isEmpty
+                            ? 0
+                            : ((rows.length - 1) ~/ _historyRowsPerPage);
+                        final currentPage = _historyPage.clamp(0, maxPage);
+                        final start = currentPage * _historyRowsPerPage;
                         final end =
                             math.min(start + _historyRowsPerPage, rows.length);
                         final paginatedRows = rows.sublist(start, end);
@@ -264,7 +402,7 @@ extension _DashboardHistorySection on _AllowanceBudgetHomeState {
                       Text(
                         rows.isEmpty
                             ? 'No rows'
-                          : 'Showing ${((_historyPage.clamp(0, ((rows.length - 1) ~/ _historyRowsPerPage))) * _historyRowsPerPage) + 1} - ${math.min(((_historyPage.clamp(0, ((rows.length - 1) ~/ _historyRowsPerPage))) + 1) * _historyRowsPerPage, rows.length)} of ${rows.length}',
+                            : 'Showing ${((_historyPage.clamp(0, ((rows.length - 1) ~/ _historyRowsPerPage))) * _historyRowsPerPage) + 1} - ${math.min(((_historyPage.clamp(0, ((rows.length - 1) ~/ _historyRowsPerPage))) + 1) * _historyRowsPerPage, rows.length)} of ${rows.length}',
                         style: TextStyle(
                             color:
                                 Theme.of(context).colorScheme.onSurfaceVariant),
@@ -272,47 +410,45 @@ extension _DashboardHistorySection on _AllowanceBudgetHomeState {
                       Row(
                         children: [
                           IconButton(
-                          onPressed: _historyPage.clamp(
-                                0,
-                                rows.isEmpty
-                                  ? 0
-                                  : ((rows.length - 1) ~/
-                                    _historyRowsPerPage)) >
-                              0
-                            ? () => _runState(() => _historyPage =
-                              _historyPage
-                                  .clamp(
-                                    0,
-                                    rows.isEmpty
-                                      ? 0
-                                      : ((rows.length - 1) ~/
-                                        _historyRowsPerPage)) -
-                                1)
+                            onPressed: _historyPage.clamp(
+                                        0,
+                                        rows.isEmpty
+                                            ? 0
+                                            : ((rows.length - 1) ~/
+                                                _historyRowsPerPage)) >
+                                    0
+                                ? () => _runState(() => _historyPage =
+                                    _historyPage.clamp(
+                                            0,
+                                            rows.isEmpty
+                                                ? 0
+                                                : ((rows.length - 1) ~/
+                                                    _historyRowsPerPage)) -
+                                        1)
                                 : null,
                             icon: const Icon(Icons.chevron_left),
                           ),
                           Text(
-                            '${(_historyPage.clamp(0, rows.isEmpty ? 0 : ((rows.length - 1) ~/ _historyRowsPerPage))) + 1}/${rows.isEmpty ? 1 : ((rows.length - 1) ~/ _historyRowsPerPage) + 1}'),
+                              '${(_historyPage.clamp(0, rows.isEmpty ? 0 : ((rows.length - 1) ~/ _historyRowsPerPage))) + 1}/${rows.isEmpty ? 1 : ((rows.length - 1) ~/ _historyRowsPerPage) + 1}'),
                           IconButton(
-                          onPressed: ((_historyPage.clamp(
-                                    0,
-                                    rows.isEmpty
-                                      ? 0
-                                      : ((rows.length - 1) ~/
-                                        _historyRowsPerPage)) +
-                                  1) *
-                                _historyRowsPerPage) <
-                              rows.length
-                            ? () => _runState(() => _historyPage =
-                              _historyPage
-                                  .clamp(
-                                    0,
-                                    rows.isEmpty
-                                      ? 0
-                                      : ((rows.length - 1) ~/
-                                        _historyRowsPerPage)) +
-                                1)
-                                    : null,
+                            onPressed: ((_historyPage.clamp(
+                                                0,
+                                                rows.isEmpty
+                                                    ? 0
+                                                    : ((rows.length - 1) ~/
+                                                        _historyRowsPerPage)) +
+                                            1) *
+                                        _historyRowsPerPage) <
+                                    rows.length
+                                ? () => _runState(() => _historyPage =
+                                    _historyPage.clamp(
+                                            0,
+                                            rows.isEmpty
+                                                ? 0
+                                                : ((rows.length - 1) ~/
+                                                    _historyRowsPerPage)) +
+                                        1)
+                                : null,
                             icon: const Icon(Icons.chevron_right),
                           ),
                         ],

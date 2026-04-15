@@ -2226,12 +2226,15 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
             'Week $weekNumber: ${DateFormat('MMM d').format(startDate)} - ${DateFormat('d').format(endDate)}',
       );
     });
+    final isWholeMonthSelected = _lineChartWeek == 0;
     final effectiveLineWeek =
         weekRanges.any((week) => week.weekNumber == _lineChartWeek)
             ? _lineChartWeek
             : 1;
     final selectedWeek =
         weekRanges.firstWhere((week) => week.weekNumber == effectiveLineWeek);
+    final selectedPeriodLabel =
+        isWholeMonthSelected ? 'Whole Month' : selectedWeek.label;
 
     final selectedSeriesNames = effectiveLineCategory == 'all'
         ? categories
@@ -2244,10 +2247,13 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
             tx.date.day >= selectedWeek.startDay &&
             tx.date.day <= selectedWeek.endDay)
         .toList();
+    final selectedPeriodTx = isWholeMonthSelected ? monthTx : weekTx;
 
     final lineSeries = selectedSeriesNames
         .map((name) {
-          final categoryTx = weekTx.where((tx) => tx.category == name).toList()
+          final categoryTx = selectedPeriodTx
+              .where((tx) => tx.category == name)
+              .toList()
             ..sort((a, b) => a.date.compareTo(b.date));
           if (categoryTx.isEmpty) {
             return _LineSeries(name: name, values: const <double>[]);
@@ -2294,7 +2300,7 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
                       MonthlyBarChart(values: barValues, labels: monthLabels),
                 );
                 final chartB = _ChartCard(
-                  title: 'Weekly Spending Trend (Line graph)',
+                  title: 'Spending Trend (Line graph)',
                   footer: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -2318,50 +2324,196 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
                       Row(
                         children: [
                           Expanded(
-                            child: DropdownButton<String>(
-                              isExpanded: true,
-                              value: effectiveLineMonth,
-                              onChanged: (value) {
-                                if (value != null) {
-                                  setState(() {
-                                    _lineChartMonth = value;
-                                    _lineChartWeek = 1;
-                                  });
-                                }
-                              },
-                              items: monthOptions
-                                  .map(
-                                    (month) => DropdownMenuItem(
-                                      value: month,
-                                      child: Text(_monthLabel(month)),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .surfaceContainerHighest
+                                    .withValues(alpha: 0.55),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .outlineVariant,
+                                ),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Icon(
+                                        Icons.calendar_today_outlined,
+                                        size: 14,
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .primary,
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        'Month',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w600,
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .primary,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  DropdownButtonHideUnderline(
+                                    child: DropdownButton<String>(
+                                      isExpanded: true,
+                                      value: effectiveLineMonth,
+                                      onChanged: (value) {
+                                        if (value != null) {
+                                          setState(() {
+                                            _lineChartMonth = value;
+                                            _lineChartWeek = 1;
+                                          });
+                                        }
+                                      },
+                                      items: monthOptions
+                                          .map(
+                                            (month) => DropdownMenuItem(
+                                              value: month,
+                                              child: Row(
+                                                children: [
+                                                  Icon(
+                                                    Icons.calendar_month,
+                                                    size: 16,
+                                                    color: Theme.of(context)
+                                                        .colorScheme
+                                                        .primary,
+                                                  ),
+                                                  const SizedBox(width: 8),
+                                                  Expanded(
+                                                    child: Text(
+                                                      _monthLabel(month),
+                                                      overflow:
+                                                          TextOverflow.ellipsis,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          )
+                                          .toList(),
                                     ),
-                                  )
-                                  .toList(),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                           const SizedBox(width: 10),
                           Expanded(
-                            child: DropdownButton<String>(
-                              isExpanded: true,
-                              value: effectiveLineCategory,
-                              onChanged: (value) {
-                                if (value != null) {
-                                  setState(() => _lineChartCategory = value);
-                                }
-                              },
-                              items: [
-                                const DropdownMenuItem(
-                                  value: 'all',
-                                  child: Text('All Categories'),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .surfaceContainerHighest
+                                    .withValues(alpha: 0.55),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .outlineVariant,
                                 ),
-                                ...categories.map(
-                                  (name) => DropdownMenuItem(
-                                    value: name,
-                                    child: Text(name,
-                                        overflow: TextOverflow.ellipsis),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Icon(
+                                        Icons.pie_chart_outline,
+                                        size: 14,
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .primary,
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        'Category',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w600,
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .primary,
+                                        ),
+                                      ),
+                                    ],
                                   ),
-                                ),
-                              ],
+                                  DropdownButtonHideUnderline(
+                                    child: DropdownButton<String>(
+                                      isExpanded: true,
+                                      value: effectiveLineCategory,
+                                      onChanged: (value) {
+                                        if (value != null) {
+                                          setState(
+                                              () => _lineChartCategory = value);
+                                        }
+                                      },
+                                      items: [
+                                        DropdownMenuItem(
+                                          value: 'all',
+                                          child: Row(
+                                            children: [
+                                              Icon(
+                                                Icons.auto_graph,
+                                                size: 16,
+                                                color: Theme.of(context)
+                                                    .colorScheme
+                                                    .primary,
+                                              ),
+                                              const SizedBox(width: 8),
+                                              const Expanded(
+                                                child: Text(
+                                                  'All Categories',
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        ...categories.map(
+                                          (name) => DropdownMenuItem(
+                                            value: name,
+                                            child: Row(
+                                              children: [
+                                                Container(
+                                                  width: 10,
+                                                  height: 10,
+                                                  decoration: BoxDecoration(
+                                                    color: _categoryLineColors[
+                                                            name] ??
+                                                        _categoryLineSeedColors
+                                                            .first,
+                                                    shape: BoxShape.circle,
+                                                  ),
+                                                ),
+                                                const SizedBox(width: 8),
+                                                Expanded(
+                                                  child: Text(name,
+                                                      overflow: TextOverflow
+                                                          .ellipsis),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         ],
@@ -2373,36 +2525,90 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
                     children: [
                       Align(
                         alignment: Alignment.center,
-                        child: PopupMenuButton<int>(
+                        child: PopupMenuButton<String>(
                           onSelected: (value) {
-                            setState(() => _lineChartWeek = value);
+                            setState(() {
+                              _lineChartWeek =
+                                  value == 'all' ? 0 : int.parse(value);
+                            });
                           },
-                          itemBuilder: (context) => weekRanges
-                              .map(
-                                (week) => PopupMenuItem<int>(
-                                  value: week.weekNumber,
-                                  child: Text(week.label,
-                                      overflow: TextOverflow.ellipsis),
+                          itemBuilder: (context) => [
+                            PopupMenuItem<String>(
+                              value: 'all',
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.calendar_month_outlined,
+                                    size: 16,
+                                    color:
+                                        Theme.of(context).colorScheme.primary,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  const Expanded(
+                                    child: Text(
+                                      'Whole Month',
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            ...weekRanges.map(
+                              (week) => PopupMenuItem<String>(
+                                value: week.weekNumber.toString(),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.calendar_view_week_outlined,
+                                      size: 16,
+                                      color:
+                                          Theme.of(context).colorScheme.primary,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(week.label,
+                                          overflow: TextOverflow.ellipsis),
+                                    ),
+                                  ],
                                 ),
-                              )
-                              .toList(),
+                              ),
+                            ),
+                          ],
                           child: Container(
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 6),
+                                horizontal: 12, vertical: 8),
                             decoration: BoxDecoration(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .surfaceContainerHighest
+                                  .withValues(alpha: 0.4),
                               border: Border.all(
                                   color: Theme.of(context)
                                       .colorScheme
                                       .outlineVariant),
                               borderRadius: BorderRadius.circular(999),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .shadow
+                                      .withValues(alpha: 0.06),
+                                  blurRadius: 8,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                const Icon(Icons.calendar_view_week_outlined,
-                                    size: 18),
+                                Icon(
+                                  isWholeMonthSelected
+                                      ? Icons.calendar_month_outlined
+                                      : Icons.calendar_view_week_outlined,
+                                  size: 18,
+                                ),
                                 const SizedBox(width: 6),
-                                Text(selectedWeek.label),
+                                Text(selectedPeriodLabel),
                                 const SizedBox(width: 4),
                                 const Icon(Icons.arrow_drop_down, size: 18),
                               ],

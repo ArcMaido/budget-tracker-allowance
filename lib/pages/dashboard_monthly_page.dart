@@ -6,16 +6,14 @@ extension _DashboardMonthlySection on _AllowanceBudgetHomeState {
     final summaryRows = _buildPeriodSummaryRows();
     const rowsPerPage = 8;
     final totalRows = summaryRows.length;
-    final maxPage =
-      totalRows == 0 ? 0 : ((totalRows - 1) ~/ rowsPerPage);
+    final maxPage = totalRows == 0 ? 0 : ((totalRows - 1) ~/ rowsPerPage);
     final safePage = _monthlyPage.clamp(0, maxPage);
     if (safePage != _monthlyPage) {
       _monthlyPage = safePage;
     }
     final startIndex = totalRows == 0 ? 0 : safePage * rowsPerPage;
-    final endIndex = totalRows == 0
-        ? 0
-      : math.min(startIndex + rowsPerPage, totalRows);
+    final endIndex =
+        totalRows == 0 ? 0 : math.min(startIndex + rowsPerPage, totalRows);
     final visibleRows = totalRows == 0
         ? <_PeriodSummaryRow>[]
         : summaryRows.sublist(startIndex, endIndex);
@@ -47,7 +45,14 @@ extension _DashboardMonthlySection on _AllowanceBudgetHomeState {
                 child: Row(
                   children: [
                     ChoiceChip(
-                      label: const Text('Month'),
+                      label: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.calendar_month_outlined, size: 16),
+                          SizedBox(width: 6),
+                          Text('Month'),
+                        ],
+                      ),
                       selected: _summaryPeriod == 'month',
                       onSelected: (_) => _runState(() {
                         _summaryPeriod = 'month';
@@ -56,7 +61,14 @@ extension _DashboardMonthlySection on _AllowanceBudgetHomeState {
                     ),
                     const SizedBox(width: 8),
                     ChoiceChip(
-                      label: const Text('Week'),
+                      label: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.calendar_view_week_outlined, size: 16),
+                          SizedBox(width: 6),
+                          Text('Week'),
+                        ],
+                      ),
                       selected: _summaryPeriod == 'week',
                       onSelected: (_) => _runState(() {
                         _summaryPeriod = 'week';
@@ -65,7 +77,14 @@ extension _DashboardMonthlySection on _AllowanceBudgetHomeState {
                     ),
                     const SizedBox(width: 8),
                     ChoiceChip(
-                      label: const Text('Year'),
+                      label: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.date_range_outlined, size: 16),
+                          SizedBox(width: 6),
+                          Text('Year'),
+                        ],
+                      ),
                       selected: _summaryPeriod == 'year',
                       onSelected: (_) => _runState(() {
                         _summaryPeriod = 'year';
@@ -75,8 +94,8 @@ extension _DashboardMonthlySection on _AllowanceBudgetHomeState {
                     if (_summaryPeriod == 'week') ...[
                       const SizedBox(width: 8),
                       ActionChip(
-                        avatar: const Icon(Icons.calendar_month_outlined,
-                            size: 16),
+                        avatar:
+                            const Icon(Icons.calendar_month_outlined, size: 16),
                         label: const Text('Date'),
                         onPressed: _pickMonthlyAnchorDate,
                       ),
@@ -109,27 +128,68 @@ extension _DashboardMonthlySection on _AllowanceBudgetHomeState {
                         CheckedPopupMenuItem<String>(
                           value: 'allowance',
                           checked: _monthlyShowAllowance,
-                          child: const Text('Allowance'),
+                          child: const Row(
+                            children: [
+                              Icon(Icons.account_balance_wallet_outlined,
+                                  size: 16),
+                              SizedBox(width: 8),
+                              Text('Allowance'),
+                            ],
+                          ),
                         ),
                         CheckedPopupMenuItem<String>(
                           value: 'spent',
                           checked: _monthlyShowSpent,
-                          child: const Text('Spent'),
+                          child: const Row(
+                            children: [
+                              Icon(Icons.payments_outlined, size: 16),
+                              SizedBox(width: 8),
+                              Text('Spent'),
+                            ],
+                          ),
                         ),
                         CheckedPopupMenuItem<String>(
                           value: 'saved',
                           checked: _monthlyShowSaved,
-                          child: const Text('Saved'),
+                          child: const Row(
+                            children: [
+                              Icon(Icons.savings_outlined, size: 16),
+                              SizedBox(width: 8),
+                              Text('Saved'),
+                            ],
+                          ),
                         ),
                         CheckedPopupMenuItem<String>(
                           value: 'rate',
                           checked: _monthlyShowRate,
-                          child: const Text('Spend Rate'),
+                          child: const Row(
+                            children: [
+                              Icon(Icons.percent_outlined, size: 16),
+                              SizedBox(width: 8),
+                              Text('Spend Rate'),
+                            ],
+                          ),
                         ),
                       ],
-                      child: const Chip(
-                        avatar: Icon(Icons.view_column_outlined, size: 16),
-                        label: Text('Columns'),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: scheme.surfaceContainerHighest
+                              .withValues(alpha: 0.45),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(color: scheme.outlineVariant),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.view_column_outlined, size: 16),
+                            SizedBox(width: 6),
+                            Text('Columns'),
+                            SizedBox(width: 4),
+                            Icon(Icons.arrow_drop_down, size: 18),
+                          ],
+                        ),
                       ),
                     ),
                   ],
@@ -174,14 +234,10 @@ extension _DashboardMonthlySection on _AllowanceBudgetHomeState {
                         return DataRow(
                           cells: [
                             const DataCell(Text('')),
-                            if (_monthlyShowAllowance)
-                              const DataCell(Text('')),
-                            if (_monthlyShowSpent)
-                              const DataCell(Text('')),
-                            if (_monthlyShowSaved)
-                              const DataCell(Text('')),
-                            if (_monthlyShowRate)
-                              const DataCell(Text('')),
+                            if (_monthlyShowAllowance) const DataCell(Text('')),
+                            if (_monthlyShowSpent) const DataCell(Text('')),
+                            if (_monthlyShowSaved) const DataCell(Text('')),
+                            if (_monthlyShowRate) const DataCell(Text('')),
                           ],
                         );
                       }
