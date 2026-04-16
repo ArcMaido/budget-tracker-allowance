@@ -160,7 +160,6 @@ extension _DashboardAboutSection on _AllowanceBudgetHomeState {
                 ),
               ),
             ),
-            const SizedBox(height: 10),
             const Center(
               child: Text(
                 'Special Thanks',
@@ -181,6 +180,20 @@ extension _DashboardAboutSection on _AllowanceBudgetHomeState {
                 const SizedBox(width: 8),
                 buildRoleBadge(specialGuest.role),
               ],
+            ),
+            const SizedBox(height: 10),
+            Center(
+              child: TextButton.icon(
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const FaqPage(),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.help_outline),
+                label: const Text('FAQs'),
+              ),
             ),
           ],
         ),

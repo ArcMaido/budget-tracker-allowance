@@ -216,3 +216,59 @@ exports.confirmPasswordResetWithOtp = functions.https.onCall(async (request) => 
   return { success: true };
 });
 
+exports.sendConcernTicket = functions.https.onCall(async (request) => {
+  const data = request.data || {};
+  const name = (data.name || '').toString().trim();
+  const email = (data.email || '').toString().trim();
+  const subject = (data.subject || '').toString().trim();
+  const message = (data.message || '').toString().trim();
+
+  if (!subject) {
+    throw new functions.https.HttpsError('invalid-argument', 'Subject is required.');
+  }
+  if (!message) {
+    throw new functions.https.HttpsError('invalid-argument', 'Message is required.');
+  }
+
+  if (subject.length > 120) {
+    throw new functions.https.HttpsError('invalid-argument', 'Subject is too long.');
+  }
+  if (message.length > 4000) {
+    throw new functions.https.HttpsError('invalid-argument', 'Message is too long.');
+  }
+
+  const to = 'jimagustinbmaido@tua.edu.ph';
+  const from = process.env.SMTP_FROM || process.env.SMTP_USER;
+  const transporter = getTransporter();
+
+  const safeName = name || 'Not provided';
+  const safeEmail = email || 'Not provided';
+
+  await transporter.sendMail({
+    from,
+    to,
+    subject: `Coinzy Ticket Concern - ${subject}`,
+    text: [
+      'Coinzy Ticket Concern',
+      `Name: ${safeName}`,
+      `Email: ${safeEmail}`,
+      `Subject: ${subject}`,
+      '',
+      'Concern Details:',
+      message,
+    ].join('\n'),
+    html: `
+      <div style="font-family: Arial, sans-serif; line-height: 1.5;">
+        <h2>Coinzy Ticket Concern</h2>
+        <p><strong>Name:</strong> ${safeName}</p>
+        <p><strong>Email:</strong> ${safeEmail}</p>
+        <p><strong>Subject:</strong> ${subject}</p>
+        <p><strong>Concern Details:</strong></p>
+        <p>${message.replace(/\n/g, '<br>')}</p>
+      </div>
+    `,
+  });
+
+  return { success: true };
+});
+

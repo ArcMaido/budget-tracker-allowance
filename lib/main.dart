@@ -26,6 +26,7 @@ part 'pages/dashboard_about_page.dart';
 part 'pages/dashboard_categories_page.dart';
 part 'pages/dashboard_expenses_page.dart';
 part 'pages/dashboard_history_page.dart';
+part 'pages/dashboard_faq_page.dart';
 part 'pages/dashboard_monthly_page.dart';
 
 Future<void> main() async {

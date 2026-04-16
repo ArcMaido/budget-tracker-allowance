@@ -25,12 +25,46 @@ class _LoginPageState extends State<LoginPage> {
   final _passwordController = TextEditingController();
   bool _showPassword = false;
   bool _isLoading = false;
+  bool _showLoginFaqs = false;
   String _errorMessage = '';
   int _failedAttempts = 0;
   int _lockoutSecondsRemaining = 0;
   Timer? _lockoutTimer;
   bool _isLockoutDialogVisible = false;
   final ValueNotifier<int> _countdownNotifier = ValueNotifier<int>(0);
+
+  static const List<_LoginFaqEntry> _loginFaqs = [
+    _LoginFaqEntry(
+      icon: Icons.add_card_outlined,
+      question: 'How do I add an expense?',
+      answer:
+          'After sign in, go to Expenses, enter details, and tap Add Expense.',
+    ),
+    _LoginFaqEntry(
+      icon: Icons.wallet_outlined,
+      question: 'How do I change my monthly budget?',
+      answer:
+          'Open the dashboard allowance section and update the value for your selected month.',
+    ),
+    _LoginFaqEntry(
+      icon: Icons.history_outlined,
+      question: 'What does the History page show?',
+      answer:
+          'It shows your logged transactions with filters for category, month, and search.',
+    ),
+    _LoginFaqEntry(
+      icon: Icons.file_download_outlined,
+      question: 'Can I export my data?',
+      answer:
+          'Yes, you can export transactions to Excel and PDF from the History section.',
+    ),
+    _LoginFaqEntry(
+      icon: Icons.support_agent_outlined,
+      question: 'How do I contact the developers?',
+      answer:
+          'Use the FAQs page inside the app and submit your concern in the Ticket section.',
+    ),
+  ];
 
   bool get _isLockedOut => _lockoutSecondsRemaining > 0;
 
@@ -102,7 +136,8 @@ class _LoginPageState extends State<LoginPage> {
           _errorMessage = '';
         });
         _countdownNotifier.value = 0;
-        if (_isLockoutDialogVisible && Navigator.of(context, rootNavigator: true).canPop()) {
+        if (_isLockoutDialogVisible &&
+            Navigator.of(context, rootNavigator: true).canPop()) {
           Navigator.of(context, rootNavigator: true).pop();
         }
         _isLockoutDialogVisible = false;
@@ -128,7 +163,8 @@ class _LoginPageState extends State<LoginPage> {
         return StatefulBuilder(
           builder: (context, _) {
             return AlertDialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14)),
               title: Row(
                 children: [
                   Icon(Icons.warning_amber_rounded, color: scheme.error),
@@ -234,44 +270,45 @@ class _LoginPageState extends State<LoginPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                    Row(
-                      children: [
-                        const Spacer(),
-                        IconButton(
-                          tooltip: widget.isDarkMode ? 'Light mode' : 'Dark mode',
-                          onPressed: () => widget.onToggleDarkMode(!widget.isDarkMode),
-                          icon: Icon(
-                            widget.isDarkMode
-                                ? Icons.light_mode_outlined
-                                : Icons.dark_mode_outlined,
-                          ),
-                        ),
-                      ],
-                    ),
-                    Center(
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 300),
-                        width: 74,
-                        height: 74,
-                        decoration: BoxDecoration(
-                          color: scheme.primaryContainer,
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Icon(
-                          Icons.account_balance_wallet,
-                          size: 40,
-                          color: scheme.primary,
+                  Row(
+                    children: [
+                      const Spacer(),
+                      IconButton(
+                        tooltip: widget.isDarkMode ? 'Light mode' : 'Dark mode',
+                        onPressed: () =>
+                            widget.onToggleDarkMode(!widget.isDarkMode),
+                        icon: Icon(
+                          widget.isDarkMode
+                              ? Icons.light_mode_outlined
+                              : Icons.dark_mode_outlined,
                         ),
                       ),
+                    ],
+                  ),
+                  Center(
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 300),
+                      width: 74,
+                      height: 74,
+                      decoration: BoxDecoration(
+                        color: scheme.primaryContainer,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Icon(
+                        Icons.account_balance_wallet,
+                        size: 40,
+                        color: scheme.primary,
+                      ),
                     ),
-                    const SizedBox(height: 12),
-                    Text(
-                      'Welcome',
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
-                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Welcome',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
                   const SizedBox(height: 6),
                   Text(
                     'Sign in to continue to your allowance dashboard.',
@@ -298,7 +335,8 @@ class _LoginPageState extends State<LoginPage> {
                               ),
                               child: Text(
                                 _errorMessage,
-                                style: TextStyle(color: scheme.onErrorContainer),
+                                style:
+                                    TextStyle(color: scheme.onErrorContainer),
                               ),
                             ),
                           TextField(
@@ -319,11 +357,14 @@ class _LoginPageState extends State<LoginPage> {
                               prefixIcon: const Icon(Icons.lock_outline),
                               suffixIcon: IconButton(
                                 icon: Icon(
-                                  _showPassword ? Icons.visibility : Icons.visibility_off,
+                                  _showPassword
+                                      ? Icons.visibility
+                                      : Icons.visibility_off,
                                 ),
                                 onPressed: _isLoading || _isLockedOut
                                     ? null
-                                    : () => setState(() => _showPassword = !_showPassword),
+                                    : () => setState(
+                                        () => _showPassword = !_showPassword),
                               ),
                             ),
                           ),
@@ -331,18 +372,22 @@ class _LoginPageState extends State<LoginPage> {
                           Align(
                             alignment: Alignment.centerRight,
                             child: TextButton(
-                              onPressed: _isLoading || _isLockedOut ? null : _openForgotPassword,
+                              onPressed: _isLoading || _isLockedOut
+                                  ? null
+                                  : _openForgotPassword,
                               child: const Text('Forgot password?'),
                             ),
                           ),
                           const SizedBox(height: 14),
                           FilledButton(
-                            onPressed: _isLoading || _isLockedOut ? null : _signIn,
+                            onPressed:
+                                _isLoading || _isLockedOut ? null : _signIn,
                             child: _isLoading
                                 ? const SizedBox(
                                     width: 20,
                                     height: 20,
-                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2),
                                   )
                                 : Text(
                                     _isLockedOut
@@ -383,6 +428,141 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                     ],
                   ),
+                  const SizedBox(height: 16),
+                  TextButton.icon(
+                    onPressed: () {
+                      setState(() => _showLoginFaqs = !_showLoginFaqs);
+                    },
+                    icon: Icon(
+                      _showLoginFaqs
+                          ? Icons.keyboard_arrow_up
+                          : Icons.keyboard_arrow_down,
+                    ),
+                    label: const Text('FAQs'),
+                  ),
+                  AnimatedCrossFade(
+                    duration: const Duration(milliseconds: 250),
+                    crossFadeState: _showLoginFaqs
+                        ? CrossFadeState.showSecond
+                        : CrossFadeState.showFirst,
+                    firstChild: const SizedBox.shrink(),
+                    secondChild: Card(
+                      clipBehavior: Clip.antiAlias,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              scheme.primaryContainer.withValues(alpha: 0.45),
+                              scheme.surfaceContainerHighest
+                                  .withValues(alpha: 0.45),
+                            ],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.all(14),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Container(
+                                    width: 36,
+                                    height: 36,
+                                    decoration: BoxDecoration(
+                                      color: scheme.primary,
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: Icon(
+                                      Icons.quiz_outlined,
+                                      color: scheme.onPrimary,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  const Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'FAQs',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 16,
+                                          ),
+                                        ),
+                                        SizedBox(height: 2),
+                                        Text(
+                                          'Quick answers before signing in.',
+                                          style: TextStyle(fontSize: 12),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 10),
+                              ..._loginFaqs.map(
+                                (faq) => Card(
+                                  margin: const EdgeInsets.only(bottom: 8),
+                                  elevation: 0,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    side: BorderSide(
+                                      color: scheme.outlineVariant,
+                                    ),
+                                  ),
+                                  child: ExpansionTile(
+                                    collapsedBackgroundColor:
+                                        scheme.surface.withValues(alpha: 0.8),
+                                    backgroundColor:
+                                        scheme.surface.withValues(alpha: 0.96),
+                                    tilePadding: const EdgeInsets.symmetric(
+                                        horizontal: 12, vertical: 2),
+                                    childrenPadding: const EdgeInsets.only(
+                                        left: 12, right: 12, bottom: 12),
+                                    leading: Container(
+                                      width: 34,
+                                      height: 34,
+                                      decoration: BoxDecoration(
+                                        color: scheme.primaryContainer,
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                      child: Icon(
+                                        faq.icon,
+                                        color: scheme.onPrimaryContainer,
+                                        size: 18,
+                                      ),
+                                    ),
+                                    title: Text(
+                                      faq.question,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                    children: [
+                                      Align(
+                                        alignment: Alignment.centerLeft,
+                                        child: Text(
+                                          faq.answer,
+                                          style: TextStyle(
+                                            color: scheme.onSurfaceVariant,
+                                            height: 1.35,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -391,4 +571,16 @@ class _LoginPageState extends State<LoginPage> {
       ),
     );
   }
+}
+
+class _LoginFaqEntry {
+  const _LoginFaqEntry({
+    required this.icon,
+    required this.question,
+    required this.answer,
+  });
+
+  final IconData icon;
+  final String question;
+  final String answer;
 }
