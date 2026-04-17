@@ -64,6 +64,92 @@ class _SignupPageState extends State<SignupPage> {
     return null;
   }
 
+  bool _hasAtLeastEightLetters(String password) {
+    return RegExp(r'[A-Za-z]').allMatches(password).length >= 8;
+  }
+
+  bool _hasUppercaseLetter(String password) {
+    return RegExp(r'[A-Z]').hasMatch(password);
+  }
+
+  bool _hasNumber(String password) {
+    return RegExp(r'[0-9]').hasMatch(password);
+  }
+
+  bool _hasSymbol(String password) {
+    return RegExp(r'[^A-Za-z0-9]').hasMatch(password);
+  }
+
+  Widget _buildPasswordPolicyItem({
+    required bool isSatisfied,
+    required String label,
+  }) {
+    final scheme = Theme.of(context).colorScheme;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(
+          isSatisfied ? Icons.check_circle : Icons.radio_button_unchecked,
+          size: 18,
+          color: isSatisfied ? Colors.green : scheme.onSurfaceVariant,
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            label,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: isSatisfied ? Colors.green : scheme.onSurfaceVariant,
+                  fontWeight: isSatisfied ? FontWeight.w600 : FontWeight.w400,
+                ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPasswordPolicyChecklist(String password) {
+    final ruleSatisfied = _passwordPolicyError(password) == null;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildPasswordPolicyItem(
+          isSatisfied: password.length >= 8,
+          label: 'At least 8 characters',
+        ),
+        const SizedBox(height: 6),
+        _buildPasswordPolicyItem(
+          isSatisfied: _hasAtLeastEightLetters(password),
+          label: 'At least 8 letters (A-Z or a-z)',
+        ),
+        const SizedBox(height: 6),
+        _buildPasswordPolicyItem(
+          isSatisfied: _hasUppercaseLetter(password),
+          label: 'At least 1 uppercase letter',
+        ),
+        const SizedBox(height: 6),
+        _buildPasswordPolicyItem(
+          isSatisfied: _hasNumber(password),
+          label: 'At least 1 number',
+        ),
+        const SizedBox(height: 6),
+        _buildPasswordPolicyItem(
+          isSatisfied: _hasSymbol(password),
+          label: 'At least 1 symbol',
+        ),
+        if (ruleSatisfied) ...[
+          const SizedBox(height: 8),
+          Text(
+            'Password meets all requirements.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Colors.green,
+                  fontWeight: FontWeight.w600,
+                ),
+          ),
+        ],
+      ],
+    );
+  }
+
   Future<void> _showSignupNotice({
     required String title,
     required String message,
@@ -520,6 +606,11 @@ class _SignupPageState extends State<SignupPage> {
                               controller: _passwordController,
                               enabled: !_isLoading,
                               obscureText: !_showPassword,
+                              onChanged: (_) {
+                                if (mounted) {
+                                  setState(() {});
+                                }
+                              },
                               decoration: InputDecoration(
                                 labelText: 'Password',
                                 prefixIcon: const Icon(Icons.lock_outline),
@@ -557,11 +648,15 @@ class _SignupPageState extends State<SignupPage> {
                                   ),
                                   const SizedBox(height: 6),
                                   Text(
-                                    'Use at least 8 letters (A-Z or a-z), plus at least 1 uppercase letter, 1 number, and 1 symbol.',
+                                    'Follow the live checklist below as you type.',
                                     style: textTheme.bodySmall?.copyWith(
                                       color: scheme.onSurfaceVariant,
                                       height: 1.35,
                                     ),
+                                  ),
+                                  const SizedBox(height: 10),
+                                  _buildPasswordPolicyChecklist(
+                                    _passwordController.text,
                                   ),
                                 ],
                               ),
