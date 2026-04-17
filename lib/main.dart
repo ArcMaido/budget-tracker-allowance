@@ -1790,6 +1790,8 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
     if (_loading) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
@@ -1808,70 +1810,83 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
     }
 
     return Scaffold(
-      body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final compact = constraints.maxWidth < AppBreakpoints.compact;
-            final wide = constraints.maxWidth >= AppBreakpoints.medium;
-            final padding = EdgeInsets.all(
-              compact
-                  ? AppStyles.pagePaddingCompact
-                  : AppStyles.pagePaddingRegular,
-            );
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              scheme.primary.withValues(alpha: 0.10),
+              scheme.surface,
+              scheme.secondary.withValues(alpha: 0.07),
+            ],
+          ),
+        ),
+        child: SafeArea(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final compact = constraints.maxWidth < AppBreakpoints.compact;
+              final wide = constraints.maxWidth >= AppBreakpoints.medium;
+              final padding = EdgeInsets.all(
+                compact
+                    ? AppStyles.pagePaddingCompact
+                    : AppStyles.pagePaddingRegular,
+              );
 
-            final content = Padding(
-              padding: padding,
-              child: _buildSelectedSection(
-                now: now,
-                stats: stats,
-                categoryNames: categoryNames,
-                txRows: txRows,
-                monthOptions: monthOptions,
-              ),
-            );
+              final content = Padding(
+                padding: padding,
+                child: _buildSelectedSection(
+                  now: now,
+                  stats: stats,
+                  categoryNames: categoryNames,
+                  txRows: txRows,
+                  monthOptions: monthOptions,
+                ),
+              );
 
-            if (wide) {
-              return Row(
+              if (wide) {
+                return Row(
+                  children: [
+                    NavigationRail(
+                      selectedIndex: _selectedNavIndex,
+                      onDestinationSelected: (index) {
+                        setState(() => _selectedNavIndex = index);
+                      },
+                      labelType: NavigationRailLabelType.all,
+                      destinations: List.generate(
+                        _navLabels.length,
+                        (i) => NavigationRailDestination(
+                          icon: Icon(_navIcons[i]),
+                          label: Text(_navLabels[i]),
+                        ),
+                      ),
+                    ),
+                    const VerticalDivider(width: 1),
+                    Expanded(child: content),
+                  ],
+                );
+              }
+
+              return Column(
                 children: [
-                  NavigationRail(
+                  Expanded(child: content),
+                  NavigationBar(
                     selectedIndex: _selectedNavIndex,
                     onDestinationSelected: (index) {
                       setState(() => _selectedNavIndex = index);
                     },
-                    labelType: NavigationRailLabelType.all,
                     destinations: List.generate(
                       _navLabels.length,
-                      (i) => NavigationRailDestination(
+                      (i) => NavigationDestination(
                         icon: Icon(_navIcons[i]),
-                        label: Text(_navLabels[i]),
+                        label: _navLabels[i],
                       ),
                     ),
                   ),
-                  const VerticalDivider(width: 1),
-                  Expanded(child: content),
                 ],
               );
-            }
-
-            return Column(
-              children: [
-                Expanded(child: content),
-                NavigationBar(
-                  selectedIndex: _selectedNavIndex,
-                  onDestinationSelected: (index) {
-                    setState(() => _selectedNavIndex = index);
-                  },
-                  destinations: List.generate(
-                    _navLabels.length,
-                    (i) => NavigationDestination(
-                      icon: Icon(_navIcons[i]),
-                      label: _navLabels[i],
-                    ),
-                  ),
-                ),
-              ],
-            );
-          },
+            },
+          ),
         ),
       ),
     );
@@ -3578,118 +3593,260 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
+  Widget _buildSectionTitle(String title, String subtitle) {
     final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Settings')),
-      body: ListView(
-        padding: const EdgeInsets.all(12),
+    return Padding(
+      padding: const EdgeInsets.only(left: 2, right: 2, bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Text(
-              'Adjust currency, appearance, and account security from one place.',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: scheme.onSurfaceVariant,
-                  ),
+          Text(
+            title,
+            style: textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w800,
+              color: scheme.onSurface,
             ),
           ),
-          Card(
-            child: ListTile(
-              leading: Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: scheme.primaryContainer,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(
-                  Icons.currency_exchange,
-                  color: scheme.onPrimaryContainer,
-                ),
-              ),
-              title: const Text('Currency'),
-              subtitle: const Text('Select how amounts are displayed'),
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    _selectedCurrency,
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                  ),
-                  const SizedBox(width: 6),
-                  const Icon(Icons.chevron_right),
-                ],
-              ),
-              onTap: _openCurrencyPicker,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Card(
-            child: SwitchListTile.adaptive(
-              value: _isDarkMode,
-              onChanged: (value) {
-                setState(() => _isDarkMode = value);
-                widget.onToggleDarkMode(value);
-              },
-              secondary: Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: scheme.primaryContainer,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(
-                  _isDarkMode
-                      ? Icons.dark_mode_outlined
-                      : Icons.light_mode_outlined,
-                  color: scheme.onPrimaryContainer,
-                ),
-              ),
-              title: const Text('Dark mode'),
-              subtitle: const Text('Switch app appearance'),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Card(
-            child: ListTile(
-              leading: Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: scheme.primaryContainer,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(
-                  Icons.shield_outlined,
-                  color: scheme.onPrimaryContainer,
-                ),
-              ),
-              title: const Text('Privacy'),
-              subtitle: const Text('Change your password and account security'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: _openPrivacySettings,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Card(
-            child: ListTile(
-              leading: Icon(Icons.logout, color: Colors.red.shade700),
-              title: const Text('Log Out'),
-              subtitle: const Text('Sign out of this account'),
-              onTap: () async {
-                await widget.onLogout();
-                if (context.mounted) {
-                  Navigator.of(context).pop();
-                }
-              },
+          const SizedBox(height: 2),
+          Text(
+            subtitle,
+            style: textTheme.bodySmall?.copyWith(
+              color: scheme.onSurfaceVariant,
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildHeroCard(ColorScheme scheme, TextTheme textTheme) {
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              scheme.primaryContainer.withValues(alpha: 0.68),
+              scheme.surfaceContainerHighest.withValues(alpha: 0.9),
+            ],
+          ),
+        ),
+        padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 64,
+              height: 64,
+              decoration: BoxDecoration(
+                color: scheme.surface.withValues(alpha: 0.72),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: scheme.outlineVariant),
+              ),
+              child: Icon(
+                Icons.settings_outlined,
+                color: scheme.primary,
+                size: 34,
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Settings',
+                    style: textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Adjust your app experience, security, and currency in one place.',
+                    style: textTheme.bodyMedium?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                      height: 1.3,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      _buildPillBadge(
+                        label: _selectedCurrency,
+                        color: scheme.primary,
+                        background: scheme.primary.withValues(alpha: 0.1),
+                      ),
+                      _buildPillBadge(
+                        label: _isDarkMode ? 'Dark mode on' : 'Light mode on',
+                        color: scheme.onSurface,
+                        background: scheme.surface.withValues(alpha: 0.8),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPillBadge({
+    required String label,
+    required Color color,
+    required Color background,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.18)),
+      ),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              color: color,
+              fontWeight: FontWeight.w700,
+            ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Settings')),
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              scheme.primary.withValues(alpha: 0.10),
+              scheme.surface,
+              scheme.secondary.withValues(alpha: 0.07),
+            ],
+          ),
+        ),
+        child: ListView(
+          padding: const EdgeInsets.all(14),
+          children: [
+            _buildHeroCard(scheme, textTheme),
+            const SizedBox(height: 14),
+            _buildSectionTitle(
+              'Preferences',
+              'Tune appearance and currency for the app.',
+            ),
+            Card(
+              child: ListTile(
+                leading: Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: scheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(
+                    Icons.currency_exchange,
+                    color: scheme.onPrimaryContainer,
+                  ),
+                ),
+                title: const Text('Currency'),
+                subtitle: const Text('Select how amounts are displayed'),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _selectedCurrency,
+                      style: textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                    ),
+                    const SizedBox(width: 6),
+                    const Icon(Icons.chevron_right),
+                  ],
+                ),
+                onTap: _openCurrencyPicker,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Card(
+              child: SwitchListTile.adaptive(
+                value: _isDarkMode,
+                onChanged: (value) {
+                  setState(() => _isDarkMode = value);
+                  widget.onToggleDarkMode(value);
+                },
+                secondary: Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: scheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(
+                    _isDarkMode
+                        ? Icons.dark_mode_outlined
+                        : Icons.light_mode_outlined,
+                    color: scheme.onPrimaryContainer,
+                  ),
+                ),
+                title: const Text('Dark mode'),
+                subtitle: const Text('Switch app appearance'),
+              ),
+            ),
+            const SizedBox(height: 14),
+            _buildSectionTitle(
+              'Account',
+              'Manage security and sign out safely.',
+            ),
+            Card(
+              child: ListTile(
+                leading: Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: scheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(
+                    Icons.shield_outlined,
+                    color: scheme.onPrimaryContainer,
+                  ),
+                ),
+                title: const Text('Privacy'),
+                subtitle: const Text('Change your password and account security'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: _openPrivacySettings,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Card(
+              child: ListTile(
+                leading: Icon(Icons.logout, color: Colors.red.shade700),
+                title: const Text('Log Out'),
+                subtitle: const Text('Sign out of this account'),
+                onTap: () async {
+                  await widget.onLogout();
+                  if (context.mounted) {
+                    Navigator.of(context).pop();
+                  }
+                },
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
