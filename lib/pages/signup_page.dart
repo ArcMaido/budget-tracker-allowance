@@ -38,6 +38,32 @@ class _SignupPageState extends State<SignupPage> {
     return RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(v);
   }
 
+  String? _passwordPolicyError(String password) {
+    if (password.length < 8) {
+      return 'Password must be at least 8 characters long.';
+    }
+
+    // Allow only standard ASCII characters to avoid unsupported symbols/scripts.
+    if (!RegExp(r'^[\x21-\x7E]+$').hasMatch(password)) {
+      return 'Password can only use standard letters, numbers, and symbols (no spaces).';
+    }
+
+    final letterCount = RegExp(r'[A-Za-z]').allMatches(password).length;
+    if (letterCount < 8) {
+      return 'Password must include at least 8 letters (A-Z or a-z).';
+    }
+    if (!RegExp(r'[A-Z]').hasMatch(password)) {
+      return 'Password must include at least 1 uppercase letter.';
+    }
+    if (!RegExp(r'[0-9]').hasMatch(password)) {
+      return 'Password must include at least 1 number.';
+    }
+    if (!RegExp(r'[^A-Za-z0-9]').hasMatch(password)) {
+      return 'Password must include at least 1 symbol.';
+    }
+    return null;
+  }
+
   Future<void> _showSignupNotice({
     required String title,
     required String message,
@@ -148,8 +174,9 @@ class _SignupPageState extends State<SignupPage> {
       return;
     }
 
-    if (_passwordController.text.length < 6) {
-      setState(() => _errorMessage = 'Password must be at least 6 characters');
+    final passwordError = _passwordPolicyError(_passwordController.text);
+    if (passwordError != null) {
+      setState(() => _errorMessage = passwordError);
       return;
     }
 
@@ -507,6 +534,36 @@ class _SignupPageState extends State<SignupPage> {
                                       : () => setState(
                                           () => _showPassword = !_showPassword),
                                 ),
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: scheme.surfaceContainerHighest
+                                    .withValues(alpha: 0.45),
+                                borderRadius: BorderRadius.circular(12),
+                                border:
+                                    Border.all(color: scheme.outlineVariant),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Password Policy',
+                                    style: textTheme.labelLarge?.copyWith(
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    'Use at least 8 letters (A-Z or a-z), plus at least 1 uppercase letter, 1 number, and 1 symbol.',
+                                    style: textTheme.bodySmall?.copyWith(
+                                      color: scheme.onSurfaceVariant,
+                                      height: 1.35,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                             const SizedBox(height: 12),
