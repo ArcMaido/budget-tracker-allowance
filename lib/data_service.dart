@@ -9,6 +9,7 @@ class DataService {
 
   // Save transaction to Firebase
   static Future<void> saveTransaction({
+    required String transactionId,
     required String category,
     required double amount,
     required DateTime date,
@@ -22,13 +23,15 @@ class DataService {
           .collection('users')
           .doc(user.uid)
           .collection('transactions')
-          .add({
+          .doc(transactionId)
+          .set({
+        'transactionId': transactionId,
         'category': category,
         'amount': amount,
         'date': date,
         'description': description ?? '',
         'createdAt': DateTime.now(),
-      });
+      }, SetOptions(merge: true));
     } catch (e) {
       print('Error saving transaction: $e');
     }
@@ -78,18 +81,52 @@ class DataService {
     }
   }
 
+  // Get all transactions for current user
+  static Future<List<Map<String, dynamic>>> getAllTransactions() async {
+    try {
+      final user = _auth.currentUser;
+      if (user == null) return [];
+
+      final snapshot = await _firestore
+          .collection('users')
+          .doc(user.uid)
+          .collection('transactions')
+          .orderBy('date', descending: true)
+          .get();
+
+      return snapshot.docs.map((doc) {
+        final data = doc.data();
+        data['id'] = doc.id;
+        return data;
+      }).toList();
+    } catch (e) {
+      print('Error getting all transactions: $e');
+      return [];
+    }
+  }
+
   // Delete transaction
   static Future<void> deleteTransaction(String transactionId) async {
     try {
       final user = _auth.currentUser;
       if (user == null) return;
 
-      await _firestore
+      final transactionsRef = _firestore
           .collection('users')
           .doc(user.uid)
-          .collection('transactions')
-          .doc(transactionId)
-          .delete();
+          .collection('transactions');
+
+      // Delete by document id (new writes use this path).
+      await transactionsRef.doc(transactionId).delete();
+
+      // Backward compatibility: delete any older records that stored this id as a field.
+      final byField = await transactionsRef
+          .where('transactionId', isEqualTo: transactionId)
+          .limit(10)
+          .get();
+      for (final doc in byField.docs) {
+        await doc.reference.delete();
+      }
     } catch (e) {
       print('Error deleting transaction: $e');
     }

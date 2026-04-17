@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:country_flags/country_flags.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:excel/excel.dart' hide Border, TextSpan;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -226,6 +227,7 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
   bool _monthlyShowSaved = true;
   bool _monthlyShowRate = true;
   bool _isEditingAllowance = false;
+  bool _isAddingExpense = false;
   int _selectedNavIndex = 0;
   String _currencyCode = 'PHP';
 
@@ -286,6 +288,18 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getString(_scopedStorageKey());
       final storedCurrency = prefs.getString(_scopedCurrencyKey());
+      var nextData =
+          raw == null ? BudgetData.defaultState() : BudgetData.fromJson(raw);
+
+      // Reinstall clears local storage. If local is empty, restore from Firestore.
+      final shouldRestoreFromCloud = _isDataEffectivelyEmpty(nextData);
+      if (shouldRestoreFromCloud) {
+        final restored = await _restoreDataFromFirestore();
+        if (restored != null && !_isDataEffectivelyEmpty(restored)) {
+          nextData = restored;
+          await prefs.setString(_scopedStorageKey(), nextData.toJson());
+        }
+      }
 
       // One-time cleanup: remove old shared key so users do not inherit
       // previous account data from older app versions.
@@ -294,8 +308,8 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
       }
 
       setState(() {
-        _data =
-            raw == null ? BudgetData.defaultState() : BudgetData.fromJson(raw);
+        _data = nextData;
+        _data.transactions = _dedupeTransactions(_data.transactions);
         if (_data.monthAllowances.isEmpty && _data.monthlyAllowance > 0) {
           // Backward compatibility: migrate legacy single allowance to current month only.
           _data.monthAllowances[_nowMonthKey()] = _data.monthlyAllowance;
@@ -315,6 +329,110 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
     } catch (e) {
       setState(() => _loading = false);
     }
+  }
+
+  bool _isDataEffectivelyEmpty(BudgetData data) {
+    final hasAllowance = data.monthlyAllowance > 0 || data.monthAllowances.isNotEmpty;
+    final hasCategories = data.categories.isNotEmpty;
+    final hasTransactions = data.transactions.isNotEmpty;
+    return !hasAllowance && !hasCategories && !hasTransactions;
+  }
+
+  DateTime? _toDateTime(dynamic value) {
+    if (value is Timestamp) {
+      return value.toDate();
+    }
+    if (value is DateTime) {
+      return value;
+    }
+    if (value is String) {
+      return DateTime.tryParse(value);
+    }
+    if (value is int) {
+      return DateTime.fromMillisecondsSinceEpoch(value);
+    }
+    return null;
+  }
+
+  Future<BudgetData?> _restoreDataFromFirestore() async {
+    try {
+      final remoteTransactions = await DataService.getAllTransactions();
+      final remoteCategories = await DataService.getAllCategories();
+      final remoteAllowance = await DataService.getMonthlyAllowance();
+
+      if (remoteTransactions.isEmpty && remoteCategories.isEmpty && remoteAllowance <= 0) {
+        return null;
+      }
+
+      final categories = <String, double>{};
+      for (final row in remoteCategories) {
+        final name = ((row['name'] as String?) ?? (row['id'] as String?) ?? '').trim();
+        final budget = (row['budget'] as num?)?.toDouble() ?? 0;
+        if (name.isNotEmpty && budget > 0) {
+          categories[name] = budget;
+        }
+      }
+
+      final transactions = <ExpenseTx>[];
+      for (final row in remoteTransactions) {
+        final amount = (row['amount'] as num?)?.toDouble() ?? 0;
+        if (amount <= 0) {
+          continue;
+        }
+
+        final category = ((row['category'] as String?) ?? '').trim();
+        final title = ((row['description'] as String?) ?? '').trim();
+        final date = _toDateTime(row['date']) ?? DateTime.now();
+
+        transactions.add(
+          ExpenseTx(
+            id: (row['id'] as String?) ?? '${date.microsecondsSinceEpoch}_${transactions.length}',
+            title: title.isEmpty ? 'Untitled' : title,
+            amount: amount,
+            category: category.isEmpty ? 'General' : category,
+            date: date,
+          ),
+        );
+      }
+
+      final monthAllowances = <String, double>{};
+      if (remoteAllowance > 0) {
+        monthAllowances[_nowMonthKey()] = remoteAllowance;
+      }
+
+      return BudgetData(
+        monthlyAllowance: remoteAllowance,
+        monthAllowances: monthAllowances,
+        categories: categories,
+        transactions: _dedupeTransactions(transactions),
+      );
+    } catch (e) {
+      debugPrint('Error restoring data from Firestore: $e');
+      return null;
+    }
+  }
+
+  List<ExpenseTx> _dedupeTransactions(List<ExpenseTx> source) {
+    final seenIds = <String>{};
+    final seenFingerprints = <String>{};
+    final result = <ExpenseTx>[];
+
+    for (final tx in source) {
+      if (seenIds.contains(tx.id)) {
+        continue;
+      }
+
+      final fingerprint = '${tx.title.trim().toLowerCase()}|${tx.category.trim().toLowerCase()}|${tx.amount.toStringAsFixed(2)}|${tx.date.toIso8601String()}';
+      if (seenFingerprints.contains(fingerprint)) {
+        continue;
+      }
+
+      seenIds.add(tx.id);
+      seenFingerprints.add(fingerprint);
+      result.add(tx);
+    }
+
+    return result;
   }
 
   String _scopedCurrencyKey() {
@@ -1276,6 +1394,10 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
   }
 
   Future<void> _addExpense() async {
+    if (_isAddingExpense) {
+      return;
+    }
+
     final title = _expenseTitleController.text.trim();
     final amount = double.tryParse(_expenseAmountController.text.trim());
     final category = _expenseCategory;
@@ -1284,56 +1406,68 @@ class _AllowanceBudgetHomeState extends State<AllowanceBudgetHome> {
       return;
     }
 
-    final expenseMonthKey = _monthKey(_expenseDate);
-    final categoryBudget = _data.categories[category] ?? 0;
-    if (categoryBudget > 0) {
-      final currentCategorySpent = _data.transactions
-          .where((tx) =>
-              tx.category == category && _monthKey(tx.date) == expenseMonthKey)
-          .fold<double>(0, (sum, tx) => sum + tx.amount);
-      final projectedSpent = currentCategorySpent + amount;
+    setState(() => _isAddingExpense = true);
+    try {
 
-      if (projectedSpent > categoryBudget) {
-        final shouldContinue = await _showCategoryBudgetWarning(
-          category: category,
-          budget: categoryBudget,
-          currentSpent: currentCategorySpent,
-          nextAmount: amount,
-          monthKey: expenseMonthKey,
-        );
-        if (!shouldContinue) {
-          return;
+      final expenseMonthKey = _monthKey(_expenseDate);
+      final categoryBudget = _data.categories[category] ?? 0;
+      if (categoryBudget > 0) {
+        final currentCategorySpent = _data.transactions
+            .where((tx) =>
+                tx.category == category && _monthKey(tx.date) == expenseMonthKey)
+            .fold<double>(0, (sum, tx) => sum + tx.amount);
+        final projectedSpent = currentCategorySpent + amount;
+
+        if (projectedSpent > categoryBudget) {
+          final shouldContinue = await _showCategoryBudgetWarning(
+            category: category,
+            budget: categoryBudget,
+            currentSpent: currentCategorySpent,
+            nextAmount: amount,
+            monthKey: expenseMonthKey,
+          );
+          if (!shouldContinue) {
+            return;
+          }
         }
       }
+
+      final tx = ExpenseTx(
+        id: '${DateTime.now().microsecondsSinceEpoch}',
+        title: title,
+        amount: amount,
+        category: category,
+        date: _expenseDate,
+      );
+
+      setState(() {
+        _data.transactions.add(tx);
+        _data.transactions = _dedupeTransactions(_data.transactions);
+        _expenseTitleController.clear();
+        _expenseAmountController.clear();
+      });
+      await _save();
+      _showSweetNotification(
+        title: 'Expense Added',
+        message: '$title was added under $category.',
+        icon: Icons.check_circle_outline_rounded,
+        backgroundColor: const Color(0xFF166534),
+        foregroundColor: Colors.white,
+      );
+      unawaited(DataService.saveTransaction(
+        transactionId: tx.id,
+        category: tx.category,
+        amount: tx.amount,
+        date: tx.date,
+        description: tx.title,
+      ));
+    } finally {
+      if (mounted) {
+        setState(() => _isAddingExpense = false);
+      } else {
+        _isAddingExpense = false;
+      }
     }
-
-    final tx = ExpenseTx(
-      id: '${DateTime.now().microsecondsSinceEpoch}',
-      title: title,
-      amount: amount,
-      category: category,
-      date: _expenseDate,
-    );
-
-    setState(() {
-      _data.transactions.add(tx);
-      _expenseTitleController.clear();
-      _expenseAmountController.clear();
-    });
-    await _save();
-    _showSweetNotification(
-      title: 'Expense Added',
-      message: '$title was added under $category.',
-      icon: Icons.check_circle_outline_rounded,
-      backgroundColor: const Color(0xFF166534),
-      foregroundColor: Colors.white,
-    );
-    unawaited(DataService.saveTransaction(
-      category: tx.category,
-      amount: tx.amount,
-      date: tx.date,
-      description: tx.title,
-    ));
   }
 
   Future<void> _upsertCategory() async {
