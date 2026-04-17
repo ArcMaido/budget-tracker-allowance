@@ -423,7 +423,7 @@ class _ProfilePageState extends State<ProfilePage> {
                 children: [
                   Text(
                     isSuccess ? 'Success' : 'Error',
-                    style: TextStyle(
+                    style: const TextStyle(
                       color: fgColor,
                       fontWeight: FontWeight.w700,
                     ),
@@ -504,6 +504,22 @@ class _ProfilePageState extends State<ProfilePage> {
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
+    final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    final displayName =
+      _nameController.text.isEmpty ? 'Not set' : _nameController.text;
+    final displayRole =
+      _roleController.text.isEmpty ? 'Not set' : _roleController.text;
+    final displayEmail = user?.email ?? 'No email';
+
+    final initials = displayName == 'Not set'
+      ? 'U'
+      : displayName
+        .split(' ')
+        .where((part) => part.trim().isNotEmpty)
+        .take(2)
+        .map((part) => part.trim()[0].toUpperCase())
+        .join();
 
     if (_isLoading) {
       return Scaffold(
@@ -530,111 +546,213 @@ class _ProfilePageState extends State<ProfilePage> {
           ),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(12),
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Text(
-              'Keep your profile details up to date so your account stays easy to recognize.',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-            ),
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              scheme.primary.withValues(alpha: 0.1),
+              scheme.surface,
+              scheme.secondary.withValues(alpha: 0.08),
+            ],
           ),
-          // Edit Form
-          if (_isEditing)
+        ),
+        child: ListView(
+          padding: const EdgeInsets.all(14),
+          children: [
             Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
+              clipBehavior: Clip.antiAlias,
+              child: Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      scheme.primaryContainer.withValues(alpha: 0.62),
+                      scheme.surfaceContainerHighest.withValues(alpha: 0.85),
+                    ],
+                  ),
+                ),
+                padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+                child: Row(
                   children: [
-                    TextField(
-                      controller: _nameController,
-                      decoration: const InputDecoration(
-                        labelText: 'Full Name',
-                        prefixIcon: Icon(Icons.person_outline),
+                    Container(
+                      width: 68,
+                      height: 68,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: scheme.surface.withValues(alpha: 0.75),
+                        border: Border.all(color: scheme.outlineVariant),
                       ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: _roleController,
-                      decoration: const InputDecoration(
-                        labelText: 'Role/Title',
-                        prefixIcon: Icon(Icons.badge_outlined),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller:
-                          TextEditingController(text: user?.email ?? ''),
-                      enabled: false,
-                      decoration: const InputDecoration(
-                        labelText: 'Email (Read-only)',
-                        prefixIcon: Icon(Icons.email_outlined),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    FilledButton.icon(
-                      onPressed: _isSaving ? null : _saveProfile,
-                      icon: _isSaving
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                valueColor: AlwaysStoppedAnimation(
-                                  Colors.white,
+                      child: _coverPhotoUrl != null && _coverPhotoUrl!.isNotEmpty
+                          ? ClipOval(
+                              child: Image.network(
+                                _coverPhotoUrl!,
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) => Center(
+                                  child: Text(
+                                    initials,
+                                    style: textTheme.titleLarge?.copyWith(
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
                                 ),
                               ),
                             )
-                          : const Icon(Icons.check),
-                      label: Text(_isSaving ? 'Saving...' : 'Save Changes'),
+                          : Center(
+                              child: Text(
+                                initials,
+                                style: textTheme.titleLarge?.copyWith(
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ),
                     ),
-                  ],
-                ),
-              ),
-            )
-          else
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Profile Details',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w700,
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            displayName,
+                            style: textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.w800,
+                            ),
                           ),
-                    ),
-                    const SizedBox(height: 10),
-                    _buildInfoTile(
-                      icon: Icons.person_outline,
-                      label: 'Full Name',
-                      value: _nameController.text.isEmpty
-                          ? 'Not set'
-                          : _nameController.text,
-                    ),
-                    const Divider(),
-                    _buildInfoTile(
-                      icon: Icons.badge_outlined,
-                      label: 'Role',
-                      value: _roleController.text.isEmpty
-                          ? 'Not set'
-                          : _roleController.text,
-                    ),
-                    const Divider(),
-                    _buildInfoTile(
-                      icon: Icons.email_outlined,
-                      label: 'Email',
-                      value: user?.email ?? 'No email',
+                          const SizedBox(height: 3),
+                          Text(
+                            displayRole,
+                            style: textTheme.bodyMedium?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            displayEmail,
+                            style: textTheme.bodySmall?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
               ),
             ),
-        ],
+            const SizedBox(height: 10),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+              child: Text(
+                _isEditing
+                    ? 'Edit your details below and save when finished.'
+                    : 'Keep your profile details up to date so your account stays easy to recognize.',
+                style: textTheme.bodyMedium?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            if (_isEditing)
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        'Edit Profile',
+                        style: textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _nameController,
+                        decoration: const InputDecoration(
+                          labelText: 'Full Name',
+                          prefixIcon: Icon(Icons.person_outline),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _roleController,
+                        decoration: const InputDecoration(
+                          labelText: 'Role/Title',
+                          prefixIcon: Icon(Icons.badge_outlined),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      InputDecorator(
+                        decoration: const InputDecoration(
+                          labelText: 'Email (Read-only)',
+                          prefixIcon: Icon(Icons.email_outlined),
+                        ),
+                        child: Text(
+                          displayEmail,
+                          style: textTheme.bodyMedium,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      FilledButton.icon(
+                        onPressed: _isSaving ? null : _saveProfile,
+                        icon: _isSaving
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation(
+                                    Colors.white,
+                                  ),
+                                ),
+                              )
+                            : const Icon(Icons.check),
+                        label: Text(_isSaving ? 'Saving...' : 'Save Changes'),
+                      ),
+                    ],
+                  ),
+                ),
+              )
+            else
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Profile Details',
+                        style: textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      _buildInfoTile(
+                        icon: Icons.person_outline,
+                        label: 'Full Name',
+                        value: displayName,
+                      ),
+                      const SizedBox(height: 8),
+                      _buildInfoTile(
+                        icon: Icons.badge_outlined,
+                        label: 'Role',
+                        value: displayRole,
+                      ),
+                      const SizedBox(height: 8),
+                      _buildInfoTile(
+                        icon: Icons.email_outlined,
+                        label: 'Email',
+                        value: displayEmail,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -644,32 +762,54 @@ class _ProfilePageState extends State<ProfilePage> {
     required String label,
     required String value,
   }) {
+    final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        children: [
-          Icon(icon, size: 24),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  value,
-                  style: const TextStyle(fontSize: 14),
-                ),
-              ],
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerHighest.withValues(alpha: 0.45),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: scheme.outlineVariant),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(
+                color: scheme.primary.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(9),
+              ),
+              child: Icon(icon, size: 18, color: scheme.primary),
             ),
-          ),
-        ],
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: textTheme.labelMedium?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    value,
+                    style: textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../auth_service.dart';
+import 'forgot_password_page.dart';
 
 class SignupPage extends StatefulWidget {
   const SignupPage({
@@ -137,7 +138,8 @@ class _SignupPageState extends State<SignupPage> {
     }
 
     if (_looksLikeEmail(_nameController.text)) {
-      setState(() => _errorMessage = 'Full name must be your name, not an email address.');
+      setState(() =>
+          _errorMessage = 'Full name must be your name, not an email address.');
       return;
     }
 
@@ -152,8 +154,7 @@ class _SignupPageState extends State<SignupPage> {
     }
 
     if (!_agreedToTerms) {
-      setState(
-          () => _errorMessage = 'Please agree to terms and conditions');
+      setState(() => _errorMessage = 'Please agree to terms and conditions');
       return;
     }
 
@@ -185,7 +186,8 @@ class _SignupPageState extends State<SignupPage> {
 
       final createdUser = credential?.user ?? AuthService.currentUser;
       if (createdUser != null) {
-        if ((createdUser.displayName ?? '').trim().isEmpty && normalizedName.isNotEmpty) {
+        if ((createdUser.displayName ?? '').trim().isEmpty &&
+            normalizedName.isNotEmpty) {
           try {
             await createdUser.updateDisplayName(normalizedName);
           } catch (e) {
@@ -203,20 +205,22 @@ class _SignupPageState extends State<SignupPage> {
 
       await _showSignupNotice(
         title: 'Account Created',
-        message: 'Your account was created successfully. Please sign in with your email and password.',
+        message:
+            'Your account was created successfully. Please sign in with your email and password.',
         success: true,
       );
       await _returnToLogin();
     } catch (e) {
       final raw = e.toString();
       final email = _emailController.text.trim();
-      final hasPasswordSignIn =
-          email.isNotEmpty && await AuthService.isEmailRegisteredForPassword(email);
+      final hasPasswordSignIn = email.isNotEmpty &&
+          await AuthService.isEmailRegisteredForPassword(email);
 
       if (raw.contains('email-already-in-use')) {
         await _showSignupNotice(
           title: 'Account Exists',
-          message: 'This email is already registered. Please sign in on the Login page.',
+          message:
+              'This email is already registered. Please sign in on the Login page.',
           success: false,
         );
         await _returnToLogin();
@@ -225,7 +229,8 @@ class _SignupPageState extends State<SignupPage> {
         // Auth succeeded but there was a bridge error. Account is usable.
         await _showSignupNotice(
           title: 'Account Created',
-          message: 'Your account was created successfully. Please sign in with your email and password.',
+          message:
+              'Your account was created successfully. Please sign in with your email and password.',
           success: true,
         );
         await _returnToLogin();
@@ -238,7 +243,8 @@ class _SignupPageState extends State<SignupPage> {
         await _returnToLogin();
       } else {
         if (mounted) {
-          setState(() => _errorMessage = _friendlyAuthError(e, isGoogle: false));
+          setState(
+              () => _errorMessage = _friendlyAuthError(e, isGoogle: false));
         }
       }
     } finally {
@@ -289,213 +295,346 @@ class _SignupPageState extends State<SignupPage> {
     }
   }
 
+  Future<void> _openForgotPassword() async {
+    if (_isLoading) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ForgotPasswordPage(
+          isDarkMode: widget.isDarkMode,
+          onToggleDarkMode: widget.onToggleDarkMode,
+          initialEmail: _emailController.text.trim(),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
 
     return Scaffold(
-      backgroundColor: scheme.surface,
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 460),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
-                    children: [
-                      IconButton(
-                        onPressed: _isLoading ? null : () => Navigator.pop(context),
-                        icon: const Icon(Icons.arrow_back),
-                      ),
-                      const Spacer(),
-                      IconButton(
-                        tooltip: widget.isDarkMode ? 'Light mode' : 'Dark mode',
-                        onPressed: () => widget.onToggleDarkMode(!widget.isDarkMode),
-                        icon: Icon(
-                          widget.isDarkMode
-                              ? Icons.light_mode_outlined
-                              : Icons.dark_mode_outlined,
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              scheme.primary.withValues(alpha: 0.12),
+              scheme.surface,
+              scheme.secondary.withValues(alpha: 0.08),
+            ],
+          ),
+        ),
+        child: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 540),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        IconButton.filledTonal(
+                          onPressed:
+                              _isLoading ? null : () => Navigator.pop(context),
+                          icon: const Icon(Icons.arrow_back),
                         ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    'Create Account',
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                          fontWeight: FontWeight.w700,
+                        const Spacer(),
+                        IconButton.filledTonal(
+                          tooltip:
+                              widget.isDarkMode ? 'Light mode' : 'Dark mode',
+                          onPressed: () =>
+                              widget.onToggleDarkMode(!widget.isDarkMode),
+                          icon: Icon(
+                            widget.isDarkMode
+                                ? Icons.light_mode_outlined
+                                : Icons.dark_mode_outlined,
+                          ),
                         ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Set up your account to start tracking allowance and expenses.',
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: scheme.onSurfaceVariant,
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Card(
+                      clipBehavior: Clip.antiAlias,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              scheme.primaryContainer.withValues(alpha: 0.6),
+                              scheme.surfaceContainerHighest
+                                  .withValues(alpha: 0.85),
+                            ],
+                          ),
                         ),
-                  ),
-                  const SizedBox(height: 16),
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          if (_errorMessage.isNotEmpty)
+                        padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
                             Container(
-                              margin: const EdgeInsets.only(bottom: 14),
-                              padding: const EdgeInsets.all(12),
+                              width: 64,
+                              height: 64,
                               decoration: BoxDecoration(
-                                color: scheme.errorContainer,
-                                borderRadius: BorderRadius.circular(10),
-                                border: Border.all(color: scheme.error),
+                                color: scheme.surface.withValues(alpha: 0.75),
+                                borderRadius: BorderRadius.circular(16),
+                                border:
+                                    Border.all(color: scheme.outlineVariant),
                               ),
-                              child: Text(
-                                _errorMessage,
-                                style: TextStyle(color: scheme.onErrorContainer),
+                              child: Icon(
+                                Icons.person_add_alt_1_outlined,
+                                size: 34,
+                                color: scheme.primary,
                               ),
                             ),
-                          TextField(
-                            controller: _nameController,
-                            enabled: !_isLoading,
-                            decoration: const InputDecoration(
-                              labelText: 'Full name',
-                              prefixIcon: Icon(Icons.person_outline),
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          TextField(
-                            controller: _emailController,
-                            enabled: !_isLoading && !_emailPrefilledFromGoogle,
-                            decoration: const InputDecoration(
-                              labelText: 'Email address',
-                              prefixIcon: Icon(Icons.email_outlined),
-                            ),
-                          ),
-                          if (_emailPrefilledFromGoogle)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 6),
-                              child: Text(
-                                'Email was selected from Google account.',
-                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                      color: scheme.onSurfaceVariant,
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Create your account',
+                                    style: textTheme.titleLarge?.copyWith(
+                                      fontWeight: FontWeight.w800,
                                     ),
-                              ),
-                            ),
-                          if (_namePrefilledFromGoogle)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 6),
-                              child: Text(
-                                'Name was prefilled from Google. You can still edit it.',
-                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                      color: scheme.onSurfaceVariant,
-                                    ),
-                              ),
-                            ),
-                          const SizedBox(height: 12),
-                          TextField(
-                            controller: _passwordController,
-                            enabled: !_isLoading,
-                            obscureText: !_showPassword,
-                            decoration: InputDecoration(
-                              labelText: 'Password',
-                              prefixIcon: const Icon(Icons.lock_outline),
-                              suffixIcon: IconButton(
-                                icon: Icon(_showPassword ? Icons.visibility : Icons.visibility_off),
-                                onPressed: _isLoading
-                                    ? null
-                                    : () => setState(() => _showPassword = !_showPassword),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          TextField(
-                            controller: _confirmPasswordController,
-                            enabled: !_isLoading,
-                            obscureText: !_showConfirmPassword,
-                            decoration: InputDecoration(
-                              labelText: 'Confirm password',
-                              prefixIcon: const Icon(Icons.lock_outline),
-                              suffixIcon: IconButton(
-                                icon: Icon(
-                                  _showConfirmPassword ? Icons.visibility : Icons.visibility_off,
-                                ),
-                                onPressed: _isLoading
-                                    ? null
-                                    : () => setState(
-                                          () => _showConfirmPassword = !_showConfirmPassword,
-                                        ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          CheckboxListTile(
-                            contentPadding: EdgeInsets.zero,
-                            value: _agreedToTerms,
-                            onChanged: _isLoading
-                                ? null
-                                : (value) {
-                                    setState(() => _agreedToTerms = value ?? false);
-                                  },
-                            title: const Text('I agree to Terms and Conditions'),
-                            subtitle: Text(
-                              'Your data is encrypted and securely stored. We never share your personal information.',
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                    color: scheme.onSurfaceVariant,
                                   ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'Set up your profile and start tracking allowance and expenses in one place.',
+                                    style: textTheme.bodyMedium?.copyWith(
+                                      color: scheme.onSurfaceVariant,
+                                      height: 1.3,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
-                            controlAffinity: ListTileControlAffinity.leading,
-                          ),
-                          const SizedBox(height: 10),
-                          FilledButton(
-                            onPressed: _isLoading ? null : _signUp,
-                            child: _isLoading
-                                ? const SizedBox(
-                                    width: 20,
-                                    height: 20,
-                                    child: CircularProgressIndicator(strokeWidth: 2),
-                                  )
-                                : const Text('Create Account'),
-                          ),
-                          const SizedBox(height: 10),
-                          OutlinedButton.icon(
-                            onPressed: _isLoading ? null : _selectGoogleEmail,
-                            icon: const Icon(Icons.g_mobiledata_rounded, size: 28),
-                            label: Text(
-                              _emailPrefilledFromGoogle
-                                  ? 'Google profile selected'
-                                  : 'Use Google to prefill profile',
-                            ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        'Already have an account? ',
-                        style: TextStyle(color: scheme.onSurfaceVariant),
-                      ),
-                      GestureDetector(
-                        onTap: _isLoading ? null : () => Navigator.pop(context),
-                        child: Text(
-                          'Sign In',
-                          style: TextStyle(
-                            color: scheme.primary,
-                            fontWeight: FontWeight.w700,
-                          ),
+                    const SizedBox(height: 14),
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            if (_errorMessage.isNotEmpty)
+                              Container(
+                                margin: const EdgeInsets.only(bottom: 14),
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: scheme.errorContainer,
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: scheme.error),
+                                ),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Icon(Icons.error_outline,
+                                        color: scheme.onErrorContainer),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        _errorMessage,
+                                        style: TextStyle(
+                                            color: scheme.onErrorContainer),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            TextField(
+                              controller: _nameController,
+                              enabled: !_isLoading,
+                              textCapitalization: TextCapitalization.words,
+                              decoration: const InputDecoration(
+                                labelText: 'Full name',
+                                prefixIcon: Icon(Icons.person_outline),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            TextField(
+                              controller: _emailController,
+                              enabled:
+                                  !_isLoading && !_emailPrefilledFromGoogle,
+                              keyboardType: TextInputType.emailAddress,
+                              decoration: const InputDecoration(
+                                labelText: 'Email address',
+                                prefixIcon: Icon(Icons.email_outlined),
+                              ),
+                            ),
+                            if (_emailPrefilledFromGoogle)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 8),
+                                child: Text(
+                                  'Email was selected from Google account.',
+                                  style: textTheme.bodySmall?.copyWith(
+                                    color: scheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ),
+                            if (_namePrefilledFromGoogle)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 4),
+                                child: Text(
+                                  'Name was prefilled from Google. You can still edit it.',
+                                  style: textTheme.bodySmall?.copyWith(
+                                    color: scheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ),
+                            const SizedBox(height: 12),
+                            TextField(
+                              controller: _passwordController,
+                              enabled: !_isLoading,
+                              obscureText: !_showPassword,
+                              decoration: InputDecoration(
+                                labelText: 'Password',
+                                prefixIcon: const Icon(Icons.lock_outline),
+                                suffixIcon: IconButton(
+                                  icon: Icon(
+                                    _showPassword
+                                        ? Icons.visibility
+                                        : Icons.visibility_off,
+                                  ),
+                                  onPressed: _isLoading
+                                      ? null
+                                      : () => setState(
+                                          () => _showPassword = !_showPassword),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            TextField(
+                              controller: _confirmPasswordController,
+                              enabled: !_isLoading,
+                              obscureText: !_showConfirmPassword,
+                              decoration: InputDecoration(
+                                labelText: 'Confirm password',
+                                prefixIcon: const Icon(Icons.lock_outline),
+                                suffixIcon: IconButton(
+                                  icon: Icon(
+                                    _showConfirmPassword
+                                        ? Icons.visibility
+                                        : Icons.visibility_off,
+                                  ),
+                                  onPressed: _isLoading
+                                      ? null
+                                      : () => setState(
+                                            () => _showConfirmPassword =
+                                                !_showConfirmPassword,
+                                          ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            Container(
+                              decoration: BoxDecoration(
+                                color: scheme.surfaceContainerHighest
+                                    .withValues(alpha: 0.45),
+                                borderRadius: BorderRadius.circular(12),
+                                border:
+                                    Border.all(color: scheme.outlineVariant),
+                              ),
+                              child: CheckboxListTile(
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 2,
+                                ),
+                                value: _agreedToTerms,
+                                onChanged: _isLoading
+                                    ? null
+                                    : (value) {
+                                        setState(() =>
+                                            _agreedToTerms = value ?? false);
+                                      },
+                                title: const Text(
+                                    'I agree to Terms and Conditions'),
+                                subtitle: Text(
+                                  'Your data is encrypted and securely stored. We never share your personal information.',
+                                  style: textTheme.bodySmall?.copyWith(
+                                    color: scheme.onSurfaceVariant,
+                                  ),
+                                ),
+                                controlAffinity:
+                                    ListTileControlAffinity.leading,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            FilledButton.icon(
+                              onPressed: _isLoading ? null : _signUp,
+                              icon: _isLoading
+                                  ? const SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2),
+                                    )
+                                  : const Icon(Icons.person_add_alt_1),
+                              label: const Text('Create Account'),
+                            ),
+                            const SizedBox(height: 10),
+                            OutlinedButton.icon(
+                              onPressed: _isLoading ? null : _selectGoogleEmail,
+                              icon: const Icon(Icons.g_mobiledata_rounded,
+                                  size: 28),
+                              label: Text(
+                                _emailPrefilledFromGoogle
+                                    ? 'Google profile selected'
+                                    : 'Use Google to prefill profile',
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                    ],
-                  ),
-                ],
+                    ),
+                    const SizedBox(height: 12),
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 12),
+                        child: Column(
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text(
+                                  'Already have an account? ',
+                                  style:
+                                      TextStyle(color: scheme.onSurfaceVariant),
+                                ),
+                                GestureDetector(
+                                  onTap: _isLoading
+                                      ? null
+                                      : () => Navigator.pop(context),
+                                  child: Text(
+                                    'Sign In',
+                                    style: TextStyle(
+                                      color: scheme.primary,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            TextButton.icon(
+                              onPressed: _isLoading ? null : _openForgotPassword,
+                              icon: const Icon(Icons.lock_reset_outlined,
+                                  size: 18),
+                              label: const Text('Forgot password?'),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
