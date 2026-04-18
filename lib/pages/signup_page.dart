@@ -144,6 +144,11 @@ class _SignupPageState extends State<SignupPage> {
           isSatisfied: _hasSymbol(password),
           label: 'At least 1 symbol',
         ),
+        const SizedBox(height: 6),
+        _buildPasswordPolicyItem(
+          isSatisfied: _passwordsMatch,
+          label: 'Passwords match',
+        ),
         if (ruleSatisfied) ...[
           const SizedBox(height: 8),
           Text(
@@ -750,35 +755,6 @@ class _SignupPageState extends State<SignupPage> {
                                 ),
                               ),
                             ),
-                            const SizedBox(height: 8),
-                            if (_confirmPasswordController.text.isNotEmpty)
-                              Row(
-                                children: [
-                                  Icon(
-                                    _passwordsMatch
-                                        ? Icons.check_circle
-                                        : Icons.error_outline,
-                                    size: 18,
-                                    color: _passwordsMatch
-                                        ? scheme.primary
-                                        : scheme.error,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      _passwordsMatch
-                                          ? 'Passwords match.'
-                                          : 'Passwords do not match.',
-                                      style: textTheme.bodySmall?.copyWith(
-                                        color: _passwordsMatch
-                                            ? scheme.primary
-                                            : scheme.error,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
                             const SizedBox(height: 12),
                             Container(
                               decoration: BoxDecoration(
