@@ -80,6 +80,14 @@ class _SignupPageState extends State<SignupPage> {
     return RegExp(r'[^A-Za-z0-9]').hasMatch(password);
   }
 
+  bool get _passwordsMatch {
+    final password = _passwordController.text;
+    final confirmPassword = _confirmPasswordController.text;
+    return password.isNotEmpty &&
+        confirmPassword.isNotEmpty &&
+        password == confirmPassword;
+  }
+
   Widget _buildPasswordPolicyItem({
     required bool isSatisfied,
     required String label,
@@ -157,31 +165,84 @@ class _SignupPageState extends State<SignupPage> {
   }) async {
     if (!mounted) return;
     final scheme = Theme.of(context).colorScheme;
+    final accentColor = success ? scheme.primary : scheme.error;
+    final iconData =
+        success ? Icons.check_rounded : Icons.warning_amber_rounded;
+    final iconBackground = success
+        ? scheme.primaryContainer.withValues(alpha: 0.92)
+        : scheme.errorContainer.withValues(alpha: 0.92);
+    final iconForeground =
+        success ? scheme.onPrimaryContainer : scheme.onErrorContainer;
 
     await showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: Row(
+      builder: (dialogContext) => Dialog(
+        insetPadding: const EdgeInsets.symmetric(horizontal: 26, vertical: 24),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(22, 20, 22, 18),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                success ? Icons.check_circle_outline : Icons.info_outline,
-                color: success ? Colors.green : scheme.primary,
+              Container(
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: iconBackground,
+                  border: Border.all(
+                    color: accentColor.withValues(alpha: 0.28),
+                    width: 3,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: accentColor.withValues(alpha: 0.18),
+                      blurRadius: 16,
+                      offset: const Offset(0, 8),
+                    ),
+                  ],
+                ),
+                child: Icon(iconData, color: iconForeground, size: 40),
               ),
-              const SizedBox(width: 8),
-              Expanded(child: Text(title)),
+              const SizedBox(height: 18),
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                      height: 1.35,
+                    ),
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: accentColor,
+                    foregroundColor:
+                        success ? scheme.onPrimary : scheme.onError,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text('Continue'),
+                ),
+              ),
             ],
           ),
-          content: Text(message),
-          actions: [
-            FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('Continue'),
-            ),
-          ],
-        );
-      },
+        ),
+      ),
     );
   }
 
@@ -666,6 +727,11 @@ class _SignupPageState extends State<SignupPage> {
                               controller: _confirmPasswordController,
                               enabled: !_isLoading,
                               obscureText: !_showConfirmPassword,
+                              onChanged: (_) {
+                                if (mounted) {
+                                  setState(() {});
+                                }
+                              },
                               decoration: InputDecoration(
                                 labelText: 'Confirm password',
                                 prefixIcon: const Icon(Icons.lock_outline),
@@ -684,6 +750,35 @@ class _SignupPageState extends State<SignupPage> {
                                 ),
                               ),
                             ),
+                            const SizedBox(height: 8),
+                            if (_confirmPasswordController.text.isNotEmpty)
+                              Row(
+                                children: [
+                                  Icon(
+                                    _passwordsMatch
+                                        ? Icons.check_circle
+                                        : Icons.error_outline,
+                                    size: 18,
+                                    color: _passwordsMatch
+                                        ? scheme.primary
+                                        : scheme.error,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      _passwordsMatch
+                                          ? 'Passwords match.'
+                                          : 'Passwords do not match.',
+                                      style: textTheme.bodySmall?.copyWith(
+                                        color: _passwordsMatch
+                                            ? scheme.primary
+                                            : scheme.error,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             const SizedBox(height: 12),
                             Container(
                               decoration: BoxDecoration(
@@ -776,7 +871,8 @@ class _SignupPageState extends State<SignupPage> {
                             ),
                             const SizedBox(height: 6),
                             TextButton.icon(
-                              onPressed: _isLoading ? null : _openForgotPassword,
+                              onPressed:
+                                  _isLoading ? null : _openForgotPassword,
                               icon: const Icon(Icons.lock_reset_outlined,
                                   size: 18),
                               label: const Text('Forgot password?'),
