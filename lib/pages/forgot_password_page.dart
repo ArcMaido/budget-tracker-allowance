@@ -108,12 +108,9 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
       });
     } catch (e) {
       if (!mounted) return;
-      final errorText = e.toString().replaceFirst('Exception: ', '');
-      final isMissingAccount = errorText.contains('No account found for this email address');
       setState(() {
-        _statusMessage = isMissingAccount
-            ? 'No account found for $email. Check the email or create an account first.'
-            : 'Unable to send reset email right now. Please try again.';
+        _statusMessage =
+            'Unable to send reset email right now. Please confirm your email and try again.';
       });
     } finally {
       if (mounted) {
@@ -173,7 +170,9 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Icon(
-                  _linkSent ? Icons.mark_email_read_outlined : Icons.info_outline,
+                  _linkSent
+                      ? Icons.mark_email_read_outlined
+                      : Icons.info_outline,
                   color: _linkSent
                       ? scheme.onPrimaryContainer
                       : scheme.onErrorContainer,
@@ -226,9 +225,8 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
               ActionChip(
                 avatar: const Icon(Icons.login, size: 18),
                 label: const Text('Back to Sign In'),
-                onPressed: _isSendingLink
-                    ? null
-                    : () => Navigator.of(context).pop(),
+                onPressed:
+                    _isSendingLink ? null : () => Navigator.of(context).pop(),
               ),
             ],
           ),
@@ -261,7 +259,8 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
         if (!_linkSent) ...[
           const SizedBox(height: 4),
           TextButton(
-            onPressed: _isSendingLink ? null : () => Navigator.of(context).pop(),
+            onPressed:
+                _isSendingLink ? null : () => Navigator.of(context).pop(),
             child: const Text('Back'),
           ),
         ] else ...[
@@ -413,4 +412,3 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
     );
   }
 }
-

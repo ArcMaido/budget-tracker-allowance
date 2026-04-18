@@ -909,15 +909,14 @@ class AuthService {
       if (normalizedEmail.isEmpty) {
         throw Exception('Enter a valid email address.');
       }
-
-      final accountExists = await doesAccountExist(normalizedEmail);
-      if (!accountExists) {
-        throw Exception(
-          'No account found for this email address. Please check the email and try again.',
-        );
-      }
-
       await _auth.sendPasswordResetEmail(email: normalizedEmail);
+    } on FirebaseAuthException catch (e) {
+      // Avoid false-negative account checks and email enumeration leaks.
+      // Treat user-not-found as success to keep UX consistent.
+      if (e.code == 'user-not-found') {
+        return;
+      }
+      rethrow;
     } catch (e) {
       print('Password reset error: $e');
       rethrow;
