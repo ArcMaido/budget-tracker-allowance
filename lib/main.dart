@@ -84,6 +84,13 @@ class _CoinzyAppState extends State<CoinzyApp> {
     }
   }
 
+  Future<void> _refreshOnboardingAfterLogin() async {
+    if (!mounted) return;
+    setState(() {
+      _onboardingFuture = AuthService.isNewUser();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -134,6 +141,7 @@ class _CoinzyAppState extends State<CoinzyApp> {
             return LoginPage(
               isDarkMode: _isDarkMode,
               onToggleDarkMode: _toggleDarkMode,
+              onSignedIn: _refreshOnboardingAfterLogin,
             );
           }
 
