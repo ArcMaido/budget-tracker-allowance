@@ -50,15 +50,26 @@ class CoinzyApp extends StatefulWidget {
 
 class _CoinzyAppState extends State<CoinzyApp> {
   late bool _isDarkMode;
+  late final Stream<User?> _authStateChanges;
+  late Future<bool> _onboardingFuture;
 
   @override
   void initState() {
     super.initState();
     _isDarkMode = widget.initialDarkMode;
+    _authStateChanges = FirebaseAuth.instance.authStateChanges();
+    // Cache the Future so it doesn't rebuild on theme changes
+    _onboardingFuture = AuthService.isNewUser();
   }
 
   Future<void> _toggleDarkMode(bool value) async {
-    setState(() => _isDarkMode = value);
+    if (value == _isDarkMode) return;
+
+    if (mounted) {
+      setState(() => _isDarkMode = value);
+    }
+
+    // Save preference in background
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('darkMode', value);
   }
@@ -66,7 +77,10 @@ class _CoinzyAppState extends State<CoinzyApp> {
   Future<void> _completeOnboardingAndRefresh() async {
     await AuthService.completeOnboarding();
     if (mounted) {
-      setState(() {});
+      // Refresh the onboarding check after completion
+      setState(() {
+        _onboardingFuture = AuthService.isNewUser();
+      });
     }
   }
 
@@ -77,7 +91,18 @@ class _CoinzyAppState extends State<CoinzyApp> {
       themeMode: _isDarkMode ? ThemeMode.dark : ThemeMode.light,
       theme: ThemeData(
         useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1A7A59)),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF1A7A59),
+        ),
+        pageTransitionsTheme: const PageTransitionsTheme(
+          builders: <TargetPlatform, PageTransitionsBuilder>{
+            TargetPlatform.android: FadeUpwardsPageTransitionsBuilder(),
+            TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+            TargetPlatform.windows: FadeUpwardsPageTransitionsBuilder(),
+            TargetPlatform.linux: FadeUpwardsPageTransitionsBuilder(),
+            TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
+          },
+        ),
       ),
       darkTheme: ThemeData(
         useMaterial3: true,
@@ -86,9 +111,18 @@ class _CoinzyAppState extends State<CoinzyApp> {
           seedColor: const Color(0xFF1A7A59),
           brightness: Brightness.dark,
         ),
+        pageTransitionsTheme: const PageTransitionsTheme(
+          builders: <TargetPlatform, PageTransitionsBuilder>{
+            TargetPlatform.android: FadeUpwardsPageTransitionsBuilder(),
+            TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+            TargetPlatform.windows: FadeUpwardsPageTransitionsBuilder(),
+            TargetPlatform.linux: FadeUpwardsPageTransitionsBuilder(),
+            TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
+          },
+        ),
       ),
       home: StreamBuilder<User?>(
-        stream: FirebaseAuth.instance.authStateChanges(),
+        stream: _authStateChanges,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Scaffold(
@@ -104,7 +138,7 @@ class _CoinzyAppState extends State<CoinzyApp> {
           }
 
           return FutureBuilder<bool>(
-            future: AuthService.isNewUser(),
+            future: _onboardingFuture,
             builder: (context, onboardingSnapshot) {
               if (onboardingSnapshot.connectionState ==
                   ConnectionState.waiting) {
